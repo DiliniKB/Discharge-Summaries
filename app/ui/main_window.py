@@ -7,6 +7,7 @@ Remaining chunks fill them in one at a time.
 import sys
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -67,6 +68,37 @@ class MainWindow(QMainWindow):
         body_layout.addWidget(self.editor, stretch=1)
 
         self.patient_list.patient_selected.connect(self.editor.set_current_patient)
+
+        self._install_shortcuts()
+
+    def _install_shortcuts(self):
+        # docs/ui-spec.md §7. Print/Save shortcuts only fire when those
+        # actions are actually available (a summary is open) — same guard
+        # the buttons themselves already enforce via _set_has_open_summary.
+        QShortcut(QKeySequence("Ctrl+N"), self, activated=self.patient_list.new_card_button.click)
+
+        def focus_search():
+            self.patient_list.search_box.setFocus()
+            self.patient_list.search_box.selectAll()
+
+        QShortcut(QKeySequence("Ctrl+F"), self, activated=focus_search)
+
+        def trigger_print():
+            if self.editor.print_button.isEnabled():
+                self.editor.print_button.click()
+
+        QShortcut(QKeySequence("Ctrl+P"), self, activated=trigger_print)
+
+        def trigger_save():
+            if self.editor.save_button.isEnabled():
+                self.editor.save_button.click()
+
+        QShortcut(QKeySequence("Ctrl+S"), self, activated=trigger_save)
+
+        # No modals exist yet (print preview, dialogs) — Esc's "close modal"
+        # half will be added when one does. Its fallback ("clear search")
+        # works today.
+        QShortcut(QKeySequence("Esc"), self, activated=self.patient_list.search_box.clear)
 
     def _build_header(self):
         header = QFrame()

@@ -263,6 +263,9 @@ def build_stylesheet():
     QToolButton:disabled {{
         color: {BORDER};
     }}
+    QToolButton:focus {{
+        border: 2px solid {PRIMARY};
+    }}
     QToolButton::menu-indicator {{
         image: none;
         width: 0;

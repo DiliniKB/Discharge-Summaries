@@ -15,6 +15,10 @@ class AutoGrowTextEdit(QTextEdit):
         super().__init__(parent)
         self._min_lines = min_lines
         self._max_lines = max_lines
+        # QTextEdit defaults to inserting a literal tab character on Tab
+        # instead of moving focus — a doctor typing Procedure Steps would
+        # be stuck unable to Tab out with the keyboard. §1: keyboard-first.
+        self.setTabChangesFocus(True)
         self.textChanged.connect(self._adjust_height)
         self._adjust_height()
 
