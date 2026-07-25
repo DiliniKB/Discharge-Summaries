@@ -179,6 +179,14 @@ class MainWindow(QMainWindow):
         # open — CLAUDE.md: "closed at exit."
         self._controller.flush()
 
+        # PatientList's search debounce is a real QTimer — if a user types
+        # into search and closes the app within that ~150ms window, the
+        # timer would otherwise fire after the connection below is closed,
+        # calling refresh() on a dead connection. Found via a test-suite
+        # bug (a leftover armed timer firing against an already-closed
+        # connection in a later test), same underlying risk applies here.
+        self.patient_list._debounce.stop()
+
         backup_path = app_meta.get(self._conn, BACKUP_PATH_KEY)
         if backup_path:
             # WAL mode means recent commits may still be sitting in the
