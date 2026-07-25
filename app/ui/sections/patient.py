@@ -17,6 +17,8 @@ Cross-field validation (e.g. surgery date between admission and discharge,
 per CLAUDE.md's planned layout, not something to bolt on per-section.
 """
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QIntValidator
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLineEdit, QSizePolicy
 
 from app import theme
@@ -25,6 +27,11 @@ from app.ui.widgets.datefield import DateField
 from app.ui.widgets.labeled import LabeledField
 
 DEFAULT_WARD = "45"  # docs/schema.md: ward TEXT, "Defaults to 45"
+
+# A rushed doctor typing free text produces "O positive" / "o+" / "O Positive"
+# inconsistently for a field that exists specifically because it's clinically
+# needed (docs/decisions.md). Constrained the same way Sex already is.
+BLOOD_GROUPS = ["", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
 
 
 class PatientSection(CollapsibleSection):
@@ -40,6 +47,7 @@ class PatientSection(CollapsibleSection):
         identity_row.setSpacing(theme.FIELD_GAP)
 
         self.age_input = self._line_edit(theme.WIDTH_XS)
+        self.age_input.setValidator(QIntValidator(0, 150, self.age_input))
         identity_row.addWidget(LabeledField("Age", self.age_input))
 
         self.sex_input = QComboBox()
@@ -47,6 +55,12 @@ class PatientSection(CollapsibleSection):
         self.sex_input.setMinimumHeight(theme.INPUT_HEIGHT_PX)
         self.sex_input.setMaximumWidth(theme.WIDTH_S)
         self.sex_input.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        # macOS restricts Tab to text fields/lists by default (Cocoa HI
+        # guideline), skipping comboboxes regardless of their reported
+        # focusPolicy — confirmed by testing, not assumed. Windows doesn't
+        # have this restriction, but CLAUDE.md's "keyboard-first" tab-order
+        # requirement shouldn't rest on an OS default either way.
+        self.sex_input.setFocusPolicy(Qt.StrongFocus)
         identity_row.addWidget(LabeledField("Sex", self.sex_input))
 
         self.bht_input = self._line_edit(theme.WIDTH_M)
@@ -66,7 +80,12 @@ class PatientSection(CollapsibleSection):
         self.telephone_input = self._line_edit(theme.WIDTH_TELEPHONE)
         contact_row.addWidget(LabeledField("Telephone", self.telephone_input))
 
-        self.blood_group_input = self._line_edit(theme.WIDTH_S)
+        self.blood_group_input = QComboBox()
+        self.blood_group_input.addItems(BLOOD_GROUPS)
+        self.blood_group_input.setMinimumHeight(theme.INPUT_HEIGHT_PX)
+        self.blood_group_input.setMaximumWidth(theme.WIDTH_S)
+        self.blood_group_input.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.blood_group_input.setFocusPolicy(Qt.StrongFocus)  # see Sex combobox comment above
         contact_row.addWidget(LabeledField("Blood Group", self.blood_group_input))
 
         contact_row.addStretch()

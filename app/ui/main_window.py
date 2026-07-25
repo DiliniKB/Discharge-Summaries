@@ -6,6 +6,7 @@ Remaining chunks fill them in one at a time.
 
 import sys
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -89,6 +90,7 @@ class MainWindow(QMainWindow):
         doctor_picker.setEditable(False)  # dropdown-only by default in Qt — no readonly quirk to work around
         doctor_picker.addItems([d.name for d in self._doctors])
         doctor_picker.setFixedWidth(220)
+        doctor_picker.setFocusPolicy(Qt.StrongFocus)  # macOS skips comboboxes on Tab by default; force it explicitly
         doctor_picker.currentIndexChanged.connect(self._on_doctor_selected)
         layout.addWidget(doctor_picker)
         self._doctor_picker = doctor_picker

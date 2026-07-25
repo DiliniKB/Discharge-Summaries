@@ -10,7 +10,8 @@ this uses fixture data the same way the doctor dropdown and patient list
 fixtures do.
 """
 
-from PySide6.QtWidgets import QComboBox, QLineEdit
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QComboBox, QLineEdit, QMessageBox
 
 from app import theme
 from app.ui.widgets.autogrow_textedit import AutoGrowTextEdit
@@ -52,6 +53,7 @@ class ProcedureSection(CollapsibleSection):
         self.template_picker.addItem(TEMPLATE_PLACEHOLDER)
         self.template_picker.addItems(sorted(FIXTURE_TEMPLATES.keys()))
         self.template_picker.setMaximumWidth(200)
+        self.template_picker.setFocusPolicy(Qt.StrongFocus)  # macOS skips comboboxes on Tab by default; force it explicitly
         self.template_picker.currentIndexChanged.connect(self._on_template_selected)
         self.header_layout.addWidget(self.template_picker)
 
@@ -73,6 +75,23 @@ class ProcedureSection(CollapsibleSection):
         if index <= 0:  # the placeholder itself, not a real template
             return
         name = self.template_picker.currentText()
+
+        # A doctor who's already typed steps and taps this dropdown out of
+        # habit shouldn't lose that work silently — this would be worse
+        # than a crash (CLAUDE.md: "a crash must cost one field, not one
+        # card"), since there'd be no error to notice, just gone text.
+        if self.steps_input.toPlainText().strip():
+            reply = QMessageBox.question(
+                self,
+                "Replace procedure steps?",
+                f'"{name}" will replace the steps already typed here. Continue?',
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                self.template_picker.setCurrentIndex(0)
+                return
+
         self.steps_input.setPlainText(FIXTURE_TEMPLATES[name])
         self.template_picker.setCurrentIndex(0)  # action, not a persistent selection
 
