@@ -26,7 +26,7 @@ class CollapsibleSection(QWidget):
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
+        outer.setSpacing(theme.SPACING_UNIT * 2)  # gap between header text and the bordered card
 
         header = _ClickableHeader()
         header.setCursor(Qt.PointingHandCursor)
@@ -49,11 +49,16 @@ class CollapsibleSection(QWidget):
         header.clicked.connect(self._toggle)
         outer.addWidget(header)
 
-        self.body = QWidget()
+        # Bordered card, matching the boxed sections drawn in docs/ui-spec.md §3 —
+        # groups a section's fields visually instead of floating them on the
+        # pane background. Generic here so every section chunk gets it free.
+        self.body = QFrame()
+        self.body.setObjectName("Card")
         self.body_layout = QVBoxLayout(self.body)
         self.body_layout.setContentsMargins(
-            theme.SPACING_UNIT * 5, theme.SPACING_UNIT * 3, theme.SPACING_UNIT * 5, theme.SPACING_UNIT * 3
+            theme.SECTION_PADDING, theme.SPACING_UNIT * 4, theme.SECTION_PADDING, theme.SPACING_UNIT * 4
         )
+        self.body_layout.setSpacing(theme.FIELD_GAP)
         outer.addWidget(self.body)
 
         self._render_chevron()

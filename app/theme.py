@@ -39,6 +39,14 @@ INPUT_HEIGHT_PX = 40
 INPUT_PADDING_X = 12
 CORNER_RADIUS = 4  # real this time — QSS supports border-radius, unlike ttk
 
+# Field width tiers — a fixed set, not one-off pixel values per field.
+# Same-class fields (Sex/Blood Group, BHT/dates) should share a tier so the
+# form reads as designed rather than each field guessed independently.
+WIDTH_XS = 64   # 2-digit codes: Age, Ward
+WIDTH_S = 110   # short codes: Sex, Blood Group
+WIDTH_M = 160   # medium identifiers: BHT Number, date fields
+WIDTH_TELEPHONE = 220  # phone numbers don't fit the tiers above
+
 
 def _hover(hex_color, amount=0.08):
     """Darken a hex colour slightly, for hover/pressed states."""
@@ -110,6 +118,22 @@ def build_stylesheet():
     QLineEdit:focus, QComboBox:focus {{
         border: 2px solid {PRIMARY};
     }}
+    /* Narrow numeric boxes (DateField) — the standard 12px input padding
+       above leaves almost no room for 2-4 digits at this width. */
+    QLineEdit#DateBox {{
+        background: {SURFACE};
+        color: {TEXT};
+        border: 1px solid {BORDER};
+        border-radius: {CORNER_RADIUS}px;
+        padding: 0 6px;
+        min-height: {INPUT_HEIGHT_PX}px;
+        selection-background-color: {PRIMARY_TINT};
+        selection-color: {TEXT};
+    }}
+    QLineEdit#DateBox:focus {{
+        border: 2px solid {PRIMARY};
+    }}
+
     QComboBox::drop-down {{
         border: none;
         width: 24px;
@@ -212,6 +236,12 @@ def build_stylesheet():
     QToolButton::menu-indicator {{
         image: none;
         width: 0;
+    }}
+
+    QFrame#Card {{
+        background: {SURFACE};
+        border: 1px solid {BORDER};
+        border-radius: {CORNER_RADIUS}px;
     }}
 
     QFrame#PatientCard {{

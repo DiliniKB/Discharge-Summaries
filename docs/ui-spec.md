@@ -138,7 +138,7 @@ Gains: faster entry, no transcription typos, and the data becomes queryable late
 
 ### 4.2 Dates
 
-`DD/MM/YYYY` display order (Sri Lankan convention), stored ISO-8601. Three separate entry boxes rather than a calendar picker — typing is faster than clicking for staff entering a date they already know. Validate: surgery date must fall between admission and discharge; warn inline, don't block.
+`DD/MM/YYYY` display order (Sri Lankan convention), stored ISO-8601. A single typed field (format-as-you-type, not an input mask — Qt mask blanks render as visible `_` characters on screen, inconsistent with every other empty field) is the primary interaction: typing is faster than clicking for staff entering a date they already know. A small calendar button sits alongside it as a convenience fallback for the rarer case of not knowing the exact date offhand — additive, not a replacement of the typing-first design. Date of Discharge defaults to today (summaries are filled in around discharge time); Admission and Surgery stay blank, since they're almost always past dates by the time the form is filled in. Validate: surgery date must fall between admission and discharge; warn inline, don't block.
 
 ### 4.3 Procedure templates
 
