@@ -38,12 +38,23 @@ def _row_to_summary(row):
     return Summary(id=row["id"], **{col: row[col] for col in _SUMMARY_COLUMNS})
 
 
+_ORDER_UNDISCHARGED_FIRST = (
+    "ORDER BY (date_discharge IS NULL OR date_discharge = '') DESC, date_discharge DESC, id DESC"
+)
+# Plain "ORDER BY date_discharge DESC" would sort a blank date_discharge
+# (a brand new, not-yet-discharged card) to the BOTTOM — empty string is
+# the smallest possible value, so DESC puts it last. docs/ui-spec.md is
+# explicit: "Unsaved new cards pin to the top." This ordering puts every
+# undischarged summary first (newest such row first via id DESC), then
+# discharged ones newest-first — not just newly-created ones.
+
+
 def list_page(conn, limit=50, offset=0):
     """List pane, never loads full records — docs/schema.md 'Query patterns'."""
     rows = conn.execute(
-        "SELECT id, patient_name, bht_number, ward, date_discharge "
-        "FROM summaries WHERE deleted_at IS NULL "
-        "ORDER BY date_discharge DESC, id DESC LIMIT ? OFFSET ?",
+        f"SELECT id, patient_name, bht_number, ward, date_discharge "
+        f"FROM summaries WHERE deleted_at IS NULL "
+        f"{_ORDER_UNDISCHARGED_FIRST} LIMIT ? OFFSET ?",
         (limit, offset),
     ).fetchall()
     return [dict(r) for r in rows]
@@ -52,10 +63,10 @@ def list_page(conn, limit=50, offset=0):
 def search(conn, query, limit=50):
     like = f"%{query}%"
     rows = conn.execute(
-        "SELECT id, patient_name, bht_number, ward, date_discharge "
-        "FROM summaries WHERE deleted_at IS NULL "
-        "AND (patient_name LIKE ? OR bht_number LIKE ?) "
-        "ORDER BY date_discharge DESC LIMIT ?",
+        f"SELECT id, patient_name, bht_number, ward, date_discharge "
+        f"FROM summaries WHERE deleted_at IS NULL "
+        f"AND (patient_name LIKE ? OR bht_number LIKE ?) "
+        f"{_ORDER_UNDISCHARGED_FIRST} LIMIT ?",
         (like, like, limit),
     ).fetchall()
     return [dict(r) for r in rows]

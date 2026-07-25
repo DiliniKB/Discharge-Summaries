@@ -72,9 +72,7 @@ class Editor(QWidget):
 
     def load_summary(self, summary_id):
         """Loads a real summary from the DB through the controller and
-        populates every section. Distinct from set_current_patient(),
-        which is still fixture-driven until the patient list is wired to
-        the real DB (a later chunk)."""
+        populates every section."""
         summary = self.controller.load(summary_id)
         self.patient_section.populate(summary)
         self.procedure_section.populate(summary)
@@ -145,11 +143,6 @@ class Editor(QWidget):
         self.save_button.setEnabled(has_summary)
         self.overflow_button.setEnabled(has_summary)
         self._save_state_label.setText("Not saved" if has_summary else "")
-
-    def set_current_patient(self, patient):
-        self._name_label.setText(patient["patient_name"])
-        self._meta_label.setText(f"BHT {patient['bht_number']} · Ward {patient['ward']}")
-        self._set_has_open_summary(True)
 
     def _on_print(self):
         pass  # TODO(printing chunk): app/printing/layout.py + printer.py don't exist yet.

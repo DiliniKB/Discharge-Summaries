@@ -74,9 +74,22 @@ class MainWindow(QMainWindow):
         self.editor = Editor(self._controller)
         body_layout.addWidget(self.editor, stretch=1)
 
-        self.patient_list.patient_selected.connect(self.editor.set_current_patient)
+        self.patient_list.patient_selected.connect(self.editor.load_summary)
+        self.patient_list.new_card_button.clicked.connect(self._on_new_card)
+        # A save can change what a card should display (name/BHT typed
+        # into a previously-blank new card) — refresh the list so it
+        # stays truthful, not just the open editor.
+        self._controller.saved.connect(self.patient_list.refresh)
 
         self._install_shortcuts()
+
+    def _on_new_card(self):
+        """+ New Card — creates a real blank row immediately (ui-spec.md
+        §3.2), loads it into the editor, and selects it in the list."""
+        created = self._controller.new_summary()
+        self.editor.load_summary(created.id)
+        self.patient_list.refresh()
+        self.patient_list.select(created.id)
 
     def _install_shortcuts(self):
         # docs/ui-spec.md §7. Print/Save shortcuts only fire when those
@@ -154,7 +167,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(pane)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self.patient_list = PatientList()
+        self.patient_list = PatientList(self._conn)
         layout.addWidget(self.patient_list)
         return pane
 
