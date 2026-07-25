@@ -6,15 +6,39 @@ Most of these follow from one fact: the target machine has 4 GB of RAM and a **9
 
 ---
 
-## Python + Tkinter over .NET WinForms
+## Python over .NET WinForms
 
-**Decision:** Python 3.11, Tkinter/ttk, PyInstaller.
+**Decision:** Python 3.11, PyInstaller.
 
 .NET Framework 4.7.2 already ships with Windows 10 1809, so a .NET build would be a single exe with nothing to bundle — a better deployment story. Python was chosen for developer fluency and iteration speed on a small internal tool.
 
 **What this costs:** a bundled runtime folder instead of one file, and slower cold start. Mitigated by `--onedir` (below). Verified acceptable on the target machine before committing.
 
 **Revisit if:** startup exceeds ~4 seconds on the ward laptop, or deployment friction becomes a recurring support burden.
+
+---
+
+## PySide6 over Tkinter/ttk — and over PyQt6
+
+**Decision:** PySide6 (Qt6) for the UI layer. Supersedes the original Tkinter/ttk choice below, which is kept for the record.
+
+**Why the switch.** Tkinter's `ttk` widgets are flat by construction — no `border-radius`, no hover/pressed transitions, no shadows — and hitting even that ceiling meant hand-fixing real quirks along the way (a readonly `Combobox` pulling in the platform's default text-selection highlight was one; the scrollbar and button states were still unstyled when this decision was made). Evaluated and rejected before landing here:
+
+- **Third-party ttk themes (Azure, sv_ttk)** — not real pip dependencies (vendored `.tcl` + ~125 PNG files pulled from GitHub), fixed palettes that don't map to this app's tokens, and the PNG-per-widget-state approach means many small file reads at every launch — the exact class of cost `--onedir` exists to avoid on this disk.
+- **A local web app** (system browser or an embedded webview) — a browser tab alone commonly runs 200–500MB RAM, most or all of the ~1.6GB free on this machine. An embedded webview needs the WebView2 runtime, which Windows 10 1809 doesn't ship — bundling it adds ~150MB, downloading it on first run breaks offline-by-design entirely.
+- **Electron** — same WebView2-class runtime and RAM cost as the webview option, worse.
+
+Qt6 (via `QSS`, its CSS-like stylesheet system) gives real `border-radius`, hover/pressed states, and shadows without a browser or webview runtime — the thing ttk structurally can't do, without the cost the web-based options carry.
+
+**PySide6, not PyQt6.** Same Qt6 engine underneath, same `QSS` styling, same widget set. PyQt6 is GPLv3-or-commercial with no free path for closed-source distribution — a real question for a hospital-internal tool, not one worth leaving unresolved. PySide6 is the Qt Company's own binding, LGPL, free for this use, functionally a drop-in equivalent.
+
+**What this costs:**
+- Qt6's DLLs typically add 60–100MB+ to the PyInstaller `--onedir` output versus Tkinter's near-zero (stdlib).
+- A bare Qt window commonly runs 80–150MB RAM at idle versus Tkinter's ~20–40MB. Real, but nowhere near the 200–500MB+ a browser-based option costs — see rejected options above.
+- Every piece of Tkinter-specific code and every Tkinter-specific line across `CLAUDE.md` and `docs/` needed rewriting, not patching. Done as part of this decision, not left half-migrated.
+- `build.spec` needs the same exclusion discipline that trimmed `matplotlib`/`numpy`/`PyQt5` before — now trimming unused Qt6 modules (`QtNetwork`, `QtSql`, `QtQml`, `WebEngine`) so PyInstaller doesn't pull them in speculatively.
+
+**Revisit if:** cold-start time on the actual ward laptop exceeds what `--onedir` bought back under Tkinter, once measured. This hasn't been verified on target hardware yet — flagged as an open item below.
 
 ---
 
@@ -166,6 +190,7 @@ With a few hundred summaries, loading everything would work fine today and degra
 | Confirm S Ca units at this lab (mmol/L assumed) | Investigations grid |
 | Backup target — mapped network drive or USB | `util/backup.py` |
 | Whether encryption at rest is required | Scoped change, ask before building |
+| Verify PySide6 cold-start time on the actual ward laptop | Only tested on dev machines so far; the whole Tkinter→PySide6 switch was justified on styling, not measured startup cost |
 
 ---
 

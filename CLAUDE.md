@@ -11,9 +11,11 @@ The disk is the bottleneck — Task Manager shows 100% active time at 0 KB/s thr
 
 ## Stack
 
-Python 3.11 · Tkinter/ttk · sqlite3 (stdlib) · ReportLab · PyInstaller `--onedir`
+Python 3.11 · PySide6 (Qt6) · sqlite3 (stdlib) · ReportLab · PyInstaller `--onedir`
 
-No web framework, no ORM, no Electron, no async. Stdlib unless there's a reason.
+No web framework, no ORM, no Electron, no async, no browser/webview runtime. Stdlib unless there's a reason — PySide6 is that reason for the UI layer; see `docs/decisions.md`.
+
+**Not PyQt6.** Same Qt6 engine, but PyQt6 is GPLv3-or-commercial with no free path for closed-source distribution. PySide6 is the Qt Company's own binding, LGPL, free for this use. Don't substitute one for the other without re-checking the licensing question.
 
 ## Hard rules
 
@@ -23,7 +25,7 @@ These exist because of the machine or the setting. Don't relax them without aski
 2. **One SQLite connection**, opened at startup, closed at exit. Never per-operation.
 3. **WAL mode on** (`PRAGMA journal_mode=WAL`) so saves don't block reads.
 4. **Never `SELECT *` the summaries table into memory.** List pane uses `LIMIT`/`OFFSET`. Full record loads only on selection.
-5. **No `ttk.Notebook` for the editor sections.** Sections must be simultaneously visible and scannable. Use collapsible frames.
+5. **No `QTabWidget` for the editor sections.** Sections must be simultaneously visible and scannable. Use collapsible frames.
 6. **No login screen.** Shared ward PC. Doctor is picked from a header dropdown for attribution. See `docs/decisions.md`.
 7. **Autosave on field blur.** A crash must cost one field, not one card.
 8. **Top-level exception handler** in `run.py` — log to file, show a dialog. Never die silently.
@@ -35,7 +37,7 @@ These exist because of the machine or the setting. Don't relax them without aski
 ```
 run.py                  entry point, exception handler, logging setup
 app/config.py           paths (%APPDATA%\DischargeSummaries), constants
-app/theme.py            ttk style — all colour/type tokens live here
+app/theme.py            QSS stylesheet + palette — all colour/type tokens live here
 app/models.py           dataclasses: Summary, Doctor, Template
 app/db/                 schema.sql, connection.py, summaries.py, doctors.py, templates.py
 app/ui/main_window.py   header + split pane
@@ -54,15 +56,15 @@ data/                   gitignored, dev DB only
 
 Build `widgets/collapsible.py` and `widgets/scrollframe.py` first — everything else depends on them.
 
-## Tkinter gotchas specific to this build
+## PySide6 gotchas specific to this build
 
-- Use `ttk`, not raw `tk`. Raw Tk defaults look like 1995 and undercut trust in a clinical setting.
-- Editor pane needs `Canvas` + `Scrollbar` + inner frame with `<Configure>` bound to update scrollregion. Bind `<MouseWheel>` explicitly — Tkinter does not scroll canvases by default.
-- On ttk Entry, set **both** `background` and `fieldbackground` or the theme looks half-applied.
-- ttk widgets have no corner radius. Accept square corners. Don't draw inputs on a Canvas to fake it — costs far more than it returns.
-- 40px input height comes from `ipady` on the `grid()` call, not from a style property.
-- Collapsible section = `ttk.Frame` toggled with `grid()` / `grid_remove()`.
-- Debounce search with `after()` / `after_cancel()`. No threads.
+- Style via **QSS** (`app/theme.py`, applied once with `app.setStyleSheet(...)` at startup), not per-widget `.setStyleSheet()` calls scattered through the codebase — one sheet, one source of truth, same reason `ttk.Style` tokens lived in one file.
+- Editor pane is a `QScrollArea` (`widgets/scrollframe.py`) with a plain `QWidget` body — Qt scrolls natively here, unlike Tkinter's Canvas approach. No manual `<MouseWheel>` binding needed.
+- Collapsible section (`widgets/collapsible.py`) = a `QWidget` with a clickable header and a body `QWidget` toggled via `setVisible()` — not `QToolBox` or `QTabWidget`, same "simultaneously visible" reasoning as the hard rule above.
+- `QSS` gives real `border-radius` and hover/pressed states — use them deliberately per `docs/ui-spec.md` tokens, don't reach for effects the spec doesn't call for. Modern doesn't mean maximal.
+- 40px input height: set directly via `setMinimumHeight(40)` on inputs, not a layout hack.
+- Debounce search with `QTimer.singleShot()` / a restartable `QTimer`, not a thread.
+- **Bundle size discipline still applies.** PySide6 pulls in Qt6 modules PyInstaller may include speculatively (QtNetwork, QtSql, QtQml, WebEngine) — trim to `QtCore`/`QtGui`/`QtWidgets` only in `build.spec`. This is the PySide6-era version of the old "trim matplotlib/numpy/PyQt5" exclusion list.
 
 ## Data conventions
 

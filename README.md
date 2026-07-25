@@ -9,6 +9,7 @@ Runs on a single ward laptop. No server, no network, no installation.
 ## Requirements
 
 - Python 3.11+
+- PySide6 (Qt6) — see `docs/decisions.md` for why PySide6 and not PyQt6 or Tkinter
 - Windows for building (the target is Windows 10; `os.startfile` printing is Windows-only)
 
 ```bash
@@ -56,7 +57,7 @@ Database and printing tests use fictional patient data. Never commit real record
 |---|---|
 | `run.py` | Entry point, exception handler, logging |
 | `app/db/` | SQLite access. One connection, WAL mode. |
-| `app/ui/` | Tkinter screens. `sections/` maps 1:1 to the editor sections in the UI spec. |
+| `app/ui/` | PySide6 screens. `sections/` maps 1:1 to the editor sections in the UI spec. |
 | `app/printing/` | ReportLab A4 layout and print dispatch |
 | `docs/` | Spec, schema, decisions, deployment, user guide |
 | `data/` | Dev database. Gitignored. |

@@ -2,7 +2,7 @@
 
 **Target:** Surgical Oncology Unit, Teaching Hospital Kurunegala
 **Machine:** Acer Aspire A515-53 · i3-8145U · 4 GB RAM · 932 GB HDD · Windows 10 (1809) · 1366×768
-**Stack:** Python 3 + Tkinter/ttk + sqlite3 + ReportLab
+**Stack:** Python 3 + PySide6 (Qt6) + sqlite3 + ReportLab
 **Deployment:** PyInstaller `--onedir`, zipped, no installation
 
 ---
@@ -235,16 +235,18 @@ Segoe UI (present on every Windows 10 install; no font shipping needed).
 
 ---
 
-## 9. Tkinter implementation notes
+## 9. PySide6 implementation notes
 
-- `ttk` with a custom theme, not raw `tk` widgets — raw Tk defaults look like 1995 and undercut trust in a clinical setting.
-- **Do not** use `ttk.Notebook` for the sections. Tabs hide content; these panels must be simultaneously visible and scannable.
-- Collapsible section = `ttk.Frame` toggled with `grid()` / `grid_remove()`, chevron as a `ttk.Label` with a bound click.
-- Editor pane needs `Canvas` + `Scrollbar` + inner frame, with `<Configure>` bound to update the scroll region. Bind `<MouseWheel>` explicitly — Tkinter does not scroll canvases by default.
-- `ttk.Style().configure()` for the tokens above. Set `fieldbackground` as well as `background` on Entry, or the theme will look half-applied.
-- Corner radius is not available on ttk widgets. Either accept square corners or draw inputs on a Canvas. **Accept square corners** — the Canvas route costs far more than it returns.
-- Debounce search with `after()` / `after_cancel()`, not a thread.
-- 40 px input height comes from `ipady` on the grid call, not from a style property.
+Stack is PySide6 (Qt6), not Tkinter/ttk — see `docs/decisions.md` for why. Notes below reflect that.
+
+- Style the whole app with one **QSS** stylesheet (`app/theme.py`), applied once via `app.setStyleSheet(...)` at startup — one source of truth for the tokens in §6, not scattered per-widget `.setStyleSheet()` calls.
+- **Do not** use `QTabWidget` for the sections. Tabs hide content; these panels must be simultaneously visible and scannable.
+- Collapsible section = a `QWidget` with a clickable header row and a body `QWidget` toggled via `setVisible()`, chevron as a `QLabel` with a bound click handler — not `QToolBox` (its animated single-open-at-a-time behaviour fights "simultaneously visible").
+- Editor pane is a `QScrollArea` with a plain `QWidget` body set via `setWidget()`. Qt scrolls this natively — no manual wheel-event binding needed, unlike Tkinter's Canvas approach.
+- QSS gives real `border-radius`, hover/pressed states, and focus rings — this is the reason PySide6 was chosen over ttk. Use these deliberately, matching the tokens above; don't add effects the spec doesn't call for.
+- Debounce search with a restartable `QTimer` (`start()` again cancels the pending fire), not a thread.
+- 40 px input height: `setMinimumHeight(40)` directly on the input widget, not a layout-level hack.
+- Trim unused Qt6 modules (`QtNetwork`, `QtSql`, `QtQml`, `WebEngine`) from `build.spec` — PyInstaller can pull them in speculatively otherwise, and this app touches none of them.
 
 ---
 
