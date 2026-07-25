@@ -51,7 +51,7 @@ class Editor(QWidget):
         bar.setFixedHeight(ACTION_BAR_HEIGHT)
 
         outer = QVBoxLayout(bar)
-        outer.setContentsMargins(theme.SECTION_PADDING, 8, theme.SECTION_PADDING, 8)
+        outer.setContentsMargins(theme.SECTION_PADDING, 6, theme.SECTION_PADDING, 6)
         outer.setSpacing(2)
 
         top_row = QHBoxLayout()
@@ -61,14 +61,12 @@ class Editor(QWidget):
         top_row.addStretch()
 
         self.print_button = QPushButton("Print")
-        self.print_button.setObjectName("Primary")
-        self.print_button.setMinimumHeight(theme.INPUT_HEIGHT_PX - 8)
+        self.print_button.setObjectName("PrimaryCompact")
         self.print_button.clicked.connect(self._on_print)
         top_row.addWidget(self.print_button)
 
         self.save_button = QPushButton("Save")
-        self.save_button.setObjectName("Secondary")
-        self.save_button.setMinimumHeight(theme.INPUT_HEIGHT_PX - 8)
+        self.save_button.setObjectName("SecondaryCompact")
         self.save_button.clicked.connect(self._on_save)
         top_row.addWidget(self.save_button)
 

@@ -158,6 +158,62 @@ def build_stylesheet():
         border: 2px solid {PRIMARY};
     }}
 
+    /* Compact variants — action bars with two stacked rows in a fixed
+       height (docs/ui-spec.md §3.3) can't afford the standard 40px input
+       height's padding. #Primary/#Secondary stay full-size for New Card. */
+    QPushButton#PrimaryCompact {{
+        background: {PRIMARY};
+        color: {SURFACE};
+        border-radius: {CORNER_RADIUS}px;
+        padding: 4px {INPUT_PADDING_X}px;
+        font-size: {SIZE_FIELD_LABEL}px;
+        border: 1px solid transparent;
+    }}
+    QPushButton#PrimaryCompact:hover {{
+        background: {_hover(PRIMARY)};
+    }}
+    QPushButton#PrimaryCompact:pressed {{
+        background: {_hover(PRIMARY, 0.16)};
+    }}
+    QPushButton#SecondaryCompact {{
+        background: {SURFACE};
+        color: {TEXT};
+        border: 1px solid {BORDER};
+        border-radius: {CORNER_RADIUS}px;
+        padding: 4px {INPUT_PADDING_X}px;
+        font-size: {SIZE_FIELD_LABEL}px;
+    }}
+    QPushButton#SecondaryCompact:hover {{
+        background: {_hover(SURFACE, 0.04)};
+    }}
+    QPushButton#PrimaryCompact:disabled, QPushButton#SecondaryCompact:disabled {{
+        background: {BG};
+        color: {TEXT_MUTED};
+        border-color: {BORDER};
+    }}
+    QPushButton#PrimaryCompact:focus, QPushButton#SecondaryCompact:focus {{
+        border: 2px solid {PRIMARY};
+    }}
+
+    QToolButton {{
+        background: transparent;
+        border: none;
+        border-radius: {CORNER_RADIUS}px;
+        padding: 4px 8px;
+        font-size: {SIZE_PROCEDURE_TITLE}px;
+        color: {TEXT_MUTED};
+    }}
+    QToolButton:hover {{
+        background: {BG};
+    }}
+    QToolButton:disabled {{
+        color: {BORDER};
+    }}
+    QToolButton::menu-indicator {{
+        image: none;
+        width: 0;
+    }}
+
     QFrame#PatientCard {{
         background: {SURFACE};
         border: none;
