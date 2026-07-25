@@ -15,19 +15,22 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from app import theme
+from app import config, theme
 from app.db import app_meta, connection as db_connection
 from app.db import doctors as doctors_db
 from app.db import templates as templates_db
 from app.ui.dialogs.doctors import DoctorsDialog
+from app.ui.dialogs.settings import BACKUP_PATH_KEY, SettingsDialog
 from app.ui.dialogs.templates import TemplatesDialog
 from app.ui.editor import Editor
 from app.ui.editor_controller import EditorController
 from app.ui.patient_list import PatientList
+from app.util import backup as backup_util
 
 HEADER_HEIGHT = 56
 LIST_PANE_WIDTH = 280
@@ -160,12 +163,31 @@ class MainWindow(QMainWindow):
         layout.addWidget(doctor_picker)
         self._doctor_picker = doctor_picker
 
+        settings_button = QToolButton()
+        settings_button.setText("⚙")
+        settings_button.clicked.connect(self._open_settings)
+        layout.addWidget(settings_button)
+
         return header
+
+    def _open_settings(self):
+        dialog = SettingsDialog(self._conn, self)
+        dialog.exec()
 
     def closeEvent(self, event):
         # Never lose a pending edit on exit, and never leave the connection
         # open — CLAUDE.md: "closed at exit."
         self._controller.flush()
+
+        backup_path = app_meta.get(self._conn, BACKUP_PATH_KEY)
+        if backup_path:
+            # WAL mode means recent commits may still be sitting in the
+            # -wal file, not yet in the main .db — checkpoint first so the
+            # backed-up file is actually complete, not silently missing
+            # the last few writes.
+            self._conn.execute("PRAGMA wal_checkpoint(FULL)")
+            backup_util.backup_now(config.get_db_path(), backup_path)
+
         db_connection.close(self._conn)
         super().closeEvent(event)
 

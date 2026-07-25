@@ -65,3 +65,10 @@ def add(conn, name, designation, sort_order=0):
 def deactivate(conn, doctor_id):
     conn.execute("UPDATE doctors SET active = 0 WHERE id = ?", (doctor_id,))
     conn.commit()
+
+
+def reactivate(conn, doctor_id):
+    """Staff rotate back through the unit — deactivation isn't meant to be
+    permanent, just "not currently on the ward.\""""
+    conn.execute("UPDATE doctors SET active = 1 WHERE id = ?", (doctor_id,))
+    conn.commit()

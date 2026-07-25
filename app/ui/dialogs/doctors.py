@@ -1,9 +1,10 @@
 """Manage Doctors dialog. See docs/user-guide.md "Adding or removing doctors".
 
-Add / deactivate — never delete. docs/decisions.md: deleting a doctor
-would orphan the FK on every summary they signed, so old cards would
-print without a signing officer. No reactivate either — not described
-anywhere in the spec; deactivation is one-way by design.
+Add / deactivate / reactivate — never delete. docs/decisions.md: deleting
+a doctor would orphan the FK on every summary they signed, so old cards
+would print without a signing officer. Reactivate exists because staff
+rotate back through the unit — deactivation means "not currently here,"
+not "gone for good."
 """
 
 from PySide6.QtWidgets import QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout
@@ -87,6 +88,11 @@ class DoctorsDialog(QDialog):
             deactivate_button.setObjectName("SecondaryCompact")
             deactivate_button.clicked.connect(lambda _checked=False, d=doctor: self._on_deactivate(d))
             row_layout.addWidget(deactivate_button)
+        else:
+            reactivate_button = QPushButton("Reactivate")
+            reactivate_button.setObjectName("SecondaryCompact")
+            reactivate_button.clicked.connect(lambda _checked=False, d=doctor: self._on_reactivate(d))
+            row_layout.addWidget(reactivate_button)
 
         return row
 
@@ -104,5 +110,10 @@ class DoctorsDialog(QDialog):
 
     def _on_deactivate(self, doctor):
         doctors_db.deactivate(self._conn, doctor.id)
+        self.refresh()
+        self.doctors_changed.emit()
+
+    def _on_reactivate(self, doctor):
+        doctors_db.reactivate(self._conn, doctor.id)
         self.refresh()
         self.doctors_changed.emit()
