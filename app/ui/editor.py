@@ -3,11 +3,13 @@
 Action bar is real (breadcrumb updates on patient selection, buttons
 enable/disable correctly). Fields across all data-bearing sections now
 autosave through `controller` (app/ui/editor_controller.py) — see
-bind_controller() on each section. Print/Duplicate/Delete remain shells,
-see the TODOs below.
+bind_controller() on each section. Print opens the real Print Preview
+dialog (app/ui/dialogs/print_preview.py). Duplicate/Delete remain
+shells, see the TODOs below.
 """
 
 import datetime
+import tempfile
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -20,6 +22,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from app.ui.dialogs.print_preview import PrintPreviewDialog
 
 from app import theme
 from app.ui.sections.attachments import AttachmentsSection
@@ -145,7 +149,14 @@ class Editor(QWidget):
         self._save_state_label.setText("Not saved" if has_summary else "")
 
     def _on_print(self):
-        pass  # TODO(printing chunk): app/printing/layout.py + printer.py don't exist yet.
+        if self.controller.summary_id is None:
+            return
+        self.controller.flush()  # printed content must match what's about to be saved, not stale field values
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dialog = PrintPreviewDialog(self.controller.conn, self.controller.summary_id, tmp_dir, self)
+            dialog.exec()
+            # tmp_dir (and the rendered PDF in it) is cleaned up here, once
+            # the modal closes — CLAUDE.md: temp file, released after printing.
 
     def _on_save(self):
         self.controller.flush()

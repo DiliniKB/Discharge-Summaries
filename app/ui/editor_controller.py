@@ -107,6 +107,13 @@ class EditorController(QObject):
         keyed by label — used by InvestigationsSection.populate()."""
         return dict(self._db_investigations)
 
+    @property
+    def conn(self):
+        """Print/Duplicate/Delete need direct DB access beyond what
+        set_field()/set_investigation() provide — exposed read-only
+        rather than each caller reaching into a private attribute."""
+        return self._conn
+
     def flush(self):
         """Force-write anything pending immediately — used by Ctrl+S/Save,
         and internally before switching to a different summary."""
