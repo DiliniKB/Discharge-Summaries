@@ -274,6 +274,12 @@ def build_stylesheet():
         border-radius: {CORNER_RADIUS}px;
     }}
 
+    QFrame#DropZone {{
+        background: {BG};
+        border: 1px dashed {BORDER};
+        border-radius: {CORNER_RADIUS}px;
+    }}
+
     QFrame#PatientCard {{
         background: {SURFACE};
         border: none;

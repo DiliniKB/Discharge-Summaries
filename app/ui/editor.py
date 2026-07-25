@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from app import theme
+from app.ui.sections.attachments import AttachmentsSection
 from app.ui.sections.clinical_history import ClinicalHistorySection
 from app.ui.sections.investigations import InvestigationsSection
 from app.ui.sections.patient import PatientSection
@@ -54,10 +55,8 @@ class Editor(QWidget):
         self.investigations_section = InvestigationsSection()
         self.sections_area.add_widget(self.investigations_section)
 
-        placeholder = QLabel("(remaining section — chunk 13, Attachments)")
-        placeholder.setObjectName("Muted")
-        placeholder.setContentsMargins(theme.SECTION_PADDING, theme.SECTION_PADDING, 0, 0)
-        self.sections_area.add_widget(placeholder)
+        self.attachments_section = AttachmentsSection()
+        self.sections_area.add_widget(self.attachments_section)
 
         self._set_has_open_summary(False)
 
