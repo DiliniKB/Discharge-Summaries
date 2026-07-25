@@ -30,21 +30,21 @@ class CollapsibleSection(QWidget):
 
         header = _ClickableHeader()
         header.setCursor(Qt.PointingHandCursor)
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(theme.SPACING_UNIT * 2, theme.SPACING_UNIT * 2, theme.SPACING_UNIT * 2, theme.SPACING_UNIT * 2)
+        self.header_layout = QHBoxLayout(header)
+        self.header_layout.setContentsMargins(theme.SPACING_UNIT * 2, theme.SPACING_UNIT * 2, theme.SPACING_UNIT * 2, theme.SPACING_UNIT * 2)
 
         self._chevron = QLabel()
         self._chevron.setObjectName("SectionHeader")
-        header_layout.addWidget(self._chevron)
+        self.header_layout.addWidget(self._chevron)
 
         self._title = QLabel(title.upper())
         self._title.setObjectName("SectionHeader")
-        header_layout.addWidget(self._title)
-        header_layout.addStretch()
+        self.header_layout.addWidget(self._title)
+        self.header_layout.addStretch()
 
         self._counter = QLabel("")
         self._counter.setObjectName("Muted")
-        header_layout.addWidget(self._counter)
+        self.header_layout.addWidget(self._counter)
 
         header.clicked.connect(self._toggle)
         outer.addWidget(header)

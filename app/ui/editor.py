@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from app import theme
 from app.ui.sections.patient import PatientSection
+from app.ui.sections.procedure import ProcedureSection
 from app.ui.widgets.scrollframe import ScrollFrame
 
 ACTION_BAR_HEIGHT = 64
@@ -42,7 +43,10 @@ class Editor(QWidget):
         self.patient_section = PatientSection()
         self.sections_area.add_widget(self.patient_section)
 
-        placeholder = QLabel("(remaining sections — chunks 10-13)")
+        self.procedure_section = ProcedureSection()
+        self.sections_area.add_widget(self.procedure_section)
+
+        placeholder = QLabel("(remaining sections — chunks 11-13)")
         placeholder.setObjectName("Muted")
         placeholder.setContentsMargins(theme.SECTION_PADDING, theme.SECTION_PADDING, 0, 0)
         self.sections_area.add_widget(placeholder)

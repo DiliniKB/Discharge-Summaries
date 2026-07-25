@@ -134,6 +134,36 @@ def build_stylesheet():
         border: 2px solid {PRIMARY};
     }}
 
+    /* "Procedure title input 18px Semibold" — docs/ui-spec.md §6 */
+    QLineEdit#ProcedureTitleInput {{
+        background: {SURFACE};
+        color: {TEXT};
+        border: 1px solid {BORDER};
+        border-radius: {CORNER_RADIUS}px;
+        padding: 0 {INPUT_PADDING_X}px;
+        min-height: {INPUT_HEIGHT_PX}px;
+        font-size: {SIZE_PROCEDURE_TITLE}px;
+        font-weight: 600;
+        selection-background-color: {PRIMARY_TINT};
+        selection-color: {TEXT};
+    }}
+    QLineEdit#ProcedureTitleInput:focus {{
+        border: 2px solid {PRIMARY};
+    }}
+
+    QTextEdit {{
+        background: {SURFACE};
+        color: {TEXT};
+        border: 1px solid {BORDER};
+        border-radius: {CORNER_RADIUS}px;
+        padding: 8px {INPUT_PADDING_X}px;
+        selection-background-color: {PRIMARY_TINT};
+        selection-color: {TEXT};
+    }}
+    QTextEdit:focus {{
+        border: 2px solid {PRIMARY};
+    }}
+
     QComboBox::drop-down {{
         border: none;
         width: 24px;
