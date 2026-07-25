@@ -11,7 +11,7 @@ section doesn't own a DB connection itself, same reasoning as the doctor
 dropdown in main_window.py.
 """
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QComboBox, QLineEdit, QMessageBox
 
 from app import theme
@@ -20,9 +20,12 @@ from app.ui.widgets.collapsible import CollapsibleSection
 from app.ui.widgets.labeled import LabeledField
 
 TEMPLATE_PLACEHOLDER = "Insert template…"
+MANAGE_TEMPLATES_LABEL = "Manage templates…"
 
 
 class ProcedureSection(CollapsibleSection):
+    manage_templates_requested = Signal()
+
     def __init__(self, parent=None):
         super().__init__(title="Procedure", collapsed=False, parent=parent)
 
@@ -57,12 +60,18 @@ class ProcedureSection(CollapsibleSection):
         self.template_picker.clear()
         self.template_picker.addItem(TEMPLATE_PLACEHOLDER)
         self.template_picker.addItems(sorted(self._templates_by_name.keys()))
+        self.template_picker.addItem(MANAGE_TEMPLATES_LABEL)
         self.template_picker.blockSignals(False)
 
     def _on_template_selected(self, index):
         if index <= 0:  # the placeholder itself, not a real template
             return
         name = self.template_picker.currentText()
+
+        if name == MANAGE_TEMPLATES_LABEL:
+            self.template_picker.setCurrentIndex(0)
+            self.manage_templates_requested.emit()
+            return
 
         # A doctor who's already typed steps and taps this dropdown out of
         # habit shouldn't lose that work silently — this would be worse

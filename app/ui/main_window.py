@@ -23,6 +23,8 @@ from app import theme
 from app.db import app_meta, connection as db_connection
 from app.db import doctors as doctors_db
 from app.db import templates as templates_db
+from app.ui.dialogs.doctors import DoctorsDialog
+from app.ui.dialogs.templates import TemplatesDialog
 from app.ui.editor import Editor
 from app.ui.editor_controller import EditorController
 from app.ui.patient_list import PatientList
@@ -32,6 +34,7 @@ LIST_PANE_WIDTH = 280
 MIN_WIDTH = 1280
 MIN_HEIGHT = 720
 LAST_DOCTOR_KEY = "last_doctor_id"
+MANAGE_DOCTORS_LABEL = "Manage doctors…"
 
 
 class MainWindow(QMainWindow):
@@ -68,6 +71,7 @@ class MainWindow(QMainWindow):
 
         templates_db.seed_if_empty(self._conn)
         self.editor.procedure_section.set_templates(templates_db.list_active(self._conn))
+        self.editor.procedure_section.manage_templates_requested.connect(self._open_manage_templates)
 
         self.patient_list.patient_selected.connect(self.editor.load_summary)
         self.patient_list.new_card_button.clicked.connect(self._on_new_card)
@@ -77,6 +81,11 @@ class MainWindow(QMainWindow):
         self._controller.saved.connect(self.patient_list.refresh)
 
         self._install_shortcuts()
+
+    def _open_manage_templates(self):
+        dialog = TemplatesDialog(self._conn, self)
+        dialog.exec()
+        self.editor.procedure_section.set_templates(templates_db.list_active(self._conn))
 
     def _on_new_card(self):
         """+ New Card — creates a real blank row immediately (ui-spec.md
@@ -143,7 +152,7 @@ class MainWindow(QMainWindow):
 
         doctor_picker = QComboBox()
         doctor_picker.setEditable(False)  # dropdown-only by default in Qt — no readonly quirk to work around
-        doctor_picker.addItems([d.name for d in self._doctors])
+        doctor_picker.addItems([d.name for d in self._doctors] + [MANAGE_DOCTORS_LABEL])
         doctor_picker.setCurrentIndex(default_index)
         doctor_picker.setFixedWidth(220)
         doctor_picker.setFocusPolicy(Qt.StrongFocus)  # macOS skips comboboxes on Tab by default; force it explicitly
@@ -161,9 +170,34 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _on_doctor_selected(self, index):
+        if index == len(self._doctors):  # the "Manage doctors…" sentinel, last item
+            self._doctor_picker.blockSignals(True)
+            self._doctor_picker.setCurrentIndex(self._doctors.index(self.selected_doctor))
+            self._doctor_picker.blockSignals(False)
+            self._open_manage_doctors()
+            return
         self.selected_doctor = self._doctors[index]
         self._controller.current_doctor_id = self.selected_doctor.id
         app_meta.set(self._conn, LAST_DOCTOR_KEY, self.selected_doctor.id)
+
+    def _open_manage_doctors(self):
+        dialog = DoctorsDialog(self._conn, self)
+        dialog.exec()
+        self._reload_doctors()
+
+    def _reload_doctors(self):
+        """Called after the Manage Doctors dialog closes — rebuilds the
+        dropdown, keeping the same selection if that doctor is still
+        active, otherwise falling back to the first one."""
+        self._doctors = doctors_db.list_active(self._conn)
+        self._doctor_picker.blockSignals(True)
+        self._doctor_picker.clear()
+        self._doctor_picker.addItems([d.name for d in self._doctors] + [MANAGE_DOCTORS_LABEL])
+        idx = next((i for i, d in enumerate(self._doctors) if d.id == self.selected_doctor.id), 0)
+        self._doctor_picker.setCurrentIndex(idx)
+        self._doctor_picker.blockSignals(False)
+        self.selected_doctor = self._doctors[idx]
+        self._controller.current_doctor_id = self.selected_doctor.id
 
     def _build_list_pane(self):
         pane = QFrame()

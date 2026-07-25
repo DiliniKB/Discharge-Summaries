@@ -68,3 +68,17 @@ def list_active(conn):
 def get(conn, template_id):
     row = conn.execute("SELECT * FROM templates WHERE id = ?", (template_id,)).fetchone()
     return _row_to_template(row) if row else None
+
+
+def add(conn, name, body, sort_order=0):
+    cur = conn.execute(
+        "INSERT INTO templates (name, body, active, sort_order) VALUES (?, ?, 1, ?)",
+        (name, body, sort_order),
+    )
+    conn.commit()
+    return get(conn, cur.lastrowid)
+
+
+def update(conn, template_id, name, body):
+    conn.execute("UPDATE templates SET name = ?, body = ? WHERE id = ?", (name, body, template_id))
+    conn.commit()
