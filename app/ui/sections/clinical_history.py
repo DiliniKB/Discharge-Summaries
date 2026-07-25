@@ -50,9 +50,27 @@ class ClinicalHistorySection(CollapsibleSection):
             self.examination_input,
             self.findings_input,
         ]
+        # (widget, db_column) — used by bind_controller/populate below.
+        self._field_columns = [
+            (self.presenting_complaint_input, "presenting_complaint"),
+            (self.past_medical_history_input, "past_medical_history"),
+            (self.past_surgical_history_input, "past_surgical_history"),
+            (self.allergies_input, "allergies"),
+            (self.examination_input, "examination"),
+            (self.findings_input, "findings"),
+        ]
+
         for field in self._fields:
             field.textChanged.connect(self._update_counter)
         self._update_counter()
+
+    def bind_controller(self, controller):
+        for widget, column in self._field_columns:
+            widget.editingFinished.connect(lambda w=widget, c=column: controller.set_field(c, w.toPlainText()))
+
+    def populate(self, summary):
+        for widget, column in self._field_columns:
+            widget.setPlainText(getattr(summary, column) or "")
 
     def _update_counter(self):
         filled = sum(1 for field in self._fields if field.toPlainText().strip())

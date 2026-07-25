@@ -15,7 +15,7 @@ addAction() (trailing-edge icon), not a separate button beside the box —
 one bordered field, not two chrome elements glued together.
 """
 
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, Qt, Signal
 from PySide6.QtGui import QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QCalendarWidget, QHBoxLayout, QLineEdit, QSizePolicy, QWidget
 
@@ -39,6 +39,12 @@ def _calendar_icon():
 
 
 class DateField(QWidget):
+    # Fires whenever a complete-or-cleared value should be persisted — on
+    # blur after typing, AND on picking a date from the calendar (setText()
+    # via set_iso() doesn't trigger QLineEdit's own editingFinished, so the
+    # controller would silently miss calendar-picked dates without this).
+    value_changed = Signal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -53,6 +59,7 @@ class DateField(QWidget):
         self.line.setMinimumHeight(theme.INPUT_HEIGHT_PX)
         self.line.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.line.textEdited.connect(self._auto_format)
+        self.line.editingFinished.connect(lambda: self.value_changed.emit(self.get_iso()))
         layout.addWidget(self.line)
 
         # Convenience alongside typing, not a replacement — docs/ui-spec.md
@@ -78,6 +85,7 @@ class DateField(QWidget):
     def _on_calendar_date_picked(self, qdate):
         self.set_iso(qdate.toString("yyyy-MM-dd"))
         self._calendar.hide()
+        self.value_changed.emit(self.get_iso())
 
     def set_today(self):
         self.set_iso(QDate.currentDate().toString("yyyy-MM-dd"))

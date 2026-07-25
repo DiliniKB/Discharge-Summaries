@@ -114,3 +114,40 @@ class InvestigationsSection(CollapsibleSection):
         self.other_rows.remove(row)
         row.setParent(None)
         row.deleteLater()
+
+    def bind_controller(self, controller):
+        """The 7 standard analytes + Management + Histology only.
+
+        '+ Other' ad-hoc rows are NOT wired here — deliberately deferred.
+        Their label is itself editable, and the controller's diff logic
+        is keyed by label; renaming an ad-hoc row correctly (update the
+        existing DB row vs. treating it as a brand new one) is a real
+        edge case, not something to half-solve under time pressure. The
+        rows still work as a local-only shell, same as before this chunk.
+        """
+        for label, widget in self.analyte_inputs.items():
+            widget.editingFinished.connect(lambda w=widget, l=label: controller.set_investigation(l, w.text()))
+        self.management_input.editingFinished.connect(lambda: controller.set_field("management", self.management_input.toPlainText()))
+        self.histology_input.editingFinished.connect(lambda: controller.set_field("histology_report", self.histology_input.toPlainText()))
+
+    def populate(self, summary, investigations_by_label):
+        for label, widget in self.analyte_inputs.items():
+            row = investigations_by_label.get(label)
+            widget.setText(row["value"] if row else "")
+        self.management_input.setPlainText(summary.management or "")
+        self.histology_input.setPlainText(summary.histology_report or "")
+
+        # Ad-hoc rows: rebuild the UI list from whatever non-standard
+        # labels exist in the DB. Read-only display — editing these
+        # doesn't persist yet, see the bind_controller docstring above.
+        for row_widget in list(self.other_rows):
+            self._remove_other_row(row_widget)
+        standard_labels = {name for name, _ in ANALYTES_ROW_1 + ANALYTES_ROW_2}
+        for label, row in investigations_by_label.items():
+            if label in standard_labels:
+                continue
+            new_row = _AdHocRow(on_remove=self._remove_other_row)
+            new_row.label_input.setText(label)
+            new_row.value_input.setText(row["value"])
+            self.other_rows_layout.addWidget(new_row)
+            self.other_rows.append(new_row)

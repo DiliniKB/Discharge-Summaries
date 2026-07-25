@@ -69,17 +69,36 @@ class EditorController(QObject):
         self._pending_fields[field_name] = value
         self._timer.start(COALESCE_MS)
 
-    def set_investigation(self, label, value):
+    def set_investigation(self, label, value, unit="", sort_order=99):
+        """unit/sort_order only matter the first time a new (ad-hoc) label
+        is set — existing rows (the 7 standard analytes, or an ad-hoc row
+        already in the DB) keep their own stored unit/sort_order."""
         if self.summary_id is None:
             return
         current = self._db_investigations.get(label)
-        if current is None or current["value"] == value:
-            return
-        updated = dict(current)
-        updated["value"] = value
+        if current is not None:
+            if current["value"] == value:
+                return
+            updated = dict(current)
+            updated["value"] = value
+        else:
+            updated = {
+                "id": None,
+                "summary_id": self.summary_id,
+                "label": label,
+                "value": value,
+                "unit": unit,
+                "sort_order": sort_order,
+            }
         self._db_investigations[label] = updated
         self._pending_investigations[label] = updated
         self._timer.start(COALESCE_MS)
+
+    @property
+    def investigations(self):
+        """Read-only snapshot of the current summary's investigation rows,
+        keyed by label — used by InvestigationsSection.populate()."""
+        return dict(self._db_investigations)
 
     def flush(self):
         """Force-write anything pending immediately — used by Ctrl+S/Save,
@@ -93,10 +112,14 @@ class EditorController(QObject):
             wrote_anything = True
 
         if self._pending_investigations:
-            for row in self._pending_investigations.values():
-                summaries.upsert_investigation(
+            for label, row in self._pending_investigations.items():
+                real_id = summaries.upsert_investigation(
                     self._conn, row["id"], self.summary_id, row["label"], row["value"], row["unit"], row["sort_order"]
                 )
+                # A brand-new ad-hoc row starts with id=None; record the
+                # real id so a second edit updates in place instead of
+                # inserting a duplicate.
+                self._db_investigations[label]["id"] = real_id
             self._pending_investigations = {}
             wrote_anything = True
 

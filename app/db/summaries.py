@@ -119,14 +119,20 @@ def list_investigations(conn, summary_id):
 
 
 def upsert_investigation(conn, investigation_id, summary_id, label, value, unit, sort_order):
+    """Returns the row's id — callers with investigation_id=None (a brand
+    new ad-hoc row) need the real id back, or a second edit to the same
+    label would insert a duplicate instead of updating in place."""
     if investigation_id:
         conn.execute(
             "UPDATE investigations SET label = ?, value = ?, unit = ?, sort_order = ? WHERE id = ?",
             (label, value, unit, sort_order, investigation_id),
         )
+        conn.commit()
+        return investigation_id
     else:
-        conn.execute(
+        cur = conn.execute(
             "INSERT INTO investigations (summary_id, label, value, unit, sort_order) VALUES (?, ?, ?, ?, ?)",
             (summary_id, label, value, unit, sort_order),
         )
-    conn.commit()
+        conn.commit()
+        return cur.lastrowid

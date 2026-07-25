@@ -94,6 +94,22 @@ class ProcedureSection(CollapsibleSection):
 
         self.steps_input.setPlainText(FIXTURE_TEMPLATES[name])
         self.template_picker.setCurrentIndex(0)  # action, not a persistent selection
+        # setPlainText() doesn't trigger editingFinished (no focus change
+        # happened) — without this, Ctrl+S right after inserting a
+        # template (before ever blurring Steps) would silently miss it.
+        self.steps_input.editingFinished.emit()
+
+    def bind_controller(self, controller):
+        self.title_input.editingFinished.connect(lambda: controller.set_field("procedure_title", self.title_input.text()))
+        self.team_input.editingFinished.connect(lambda: controller.set_field("surgical_team", self.team_input.text()))
+        self.indication_input.editingFinished.connect(lambda: controller.set_field("indication", self.indication_input.text()))
+        self.steps_input.editingFinished.connect(lambda: controller.set_field("procedure_steps", self.steps_input.toPlainText()))
+
+    def populate(self, summary):
+        self.title_input.setText(summary.procedure_title or "")
+        self.team_input.setText(summary.surgical_team or "")
+        self.indication_input.setText(summary.indication or "")
+        self.steps_input.setPlainText(summary.procedure_steps or "")
 
     def _line_edit(self):
         box = QLineEdit()

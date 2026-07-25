@@ -20,8 +20,10 @@ from PySide6.QtWidgets import (
 )
 
 from app import theme
+from app.db import connection as db_connection
 from app.models import Doctor
 from app.ui.editor import Editor
+from app.ui.editor_controller import EditorController
 from app.ui.patient_list import PatientList
 
 HEADER_HEIGHT = 56
@@ -46,6 +48,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Discharge Summaries · Surgical Oncology Unit")
         self.setMinimumSize(MIN_WIDTH, MIN_HEIGHT)
 
+        # CLAUDE.md hard rule: one connection, opened at startup, closed at
+        # exit — never per-operation. See closeEvent() for the exit half.
+        self._conn = db_connection.connect()
+        self._controller = EditorController(self._conn)
+
         central = QWidget()
         self.setCentralWidget(central)
         outer = QVBoxLayout(central)
@@ -64,7 +71,7 @@ class MainWindow(QMainWindow):
         self.list_pane = self._build_list_pane()
         body_layout.addWidget(self.list_pane)
 
-        self.editor = Editor()
+        self.editor = Editor(self._controller)
         body_layout.addWidget(self.editor, stretch=1)
 
         self.patient_list.patient_selected.connect(self.editor.set_current_patient)
@@ -128,6 +135,13 @@ class MainWindow(QMainWindow):
         self._doctor_picker = doctor_picker
 
         return header
+
+    def closeEvent(self, event):
+        # Never lose a pending edit on exit, and never leave the connection
+        # open — CLAUDE.md: "closed at exit."
+        self._controller.flush()
+        db_connection.close(self._conn)
+        super().closeEvent(event)
 
     def _on_doctor_selected(self, index):
         self.selected_doctor = self._doctors[index]

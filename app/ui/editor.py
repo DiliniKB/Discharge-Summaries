@@ -1,10 +1,13 @@
 """Right pane: assembles the action bar + sections. See docs/ui-spec.md §3.3.
 
 Action bar is real (breadcrumb updates on patient selection, buttons
-enable/disable correctly). Print/Save/Duplicate/Delete are shells — there's
-no controller or DB yet to act on, see the TODOs below. Sections (chunks
-9-13) will be added into `self.sections_area` one at a time.
+enable/disable correctly). Fields across all data-bearing sections now
+autosave through `controller` (app/ui/editor_controller.py) — see
+bind_controller() on each section. Print/Duplicate/Delete remain shells,
+see the TODOs below.
 """
+
+import datetime
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -30,8 +33,9 @@ ACTION_BAR_HEIGHT = 64
 
 
 class Editor(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, controller, parent=None):
         super().__init__(parent)
+        self.controller = controller
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -58,7 +62,34 @@ class Editor(QWidget):
         self.attachments_section = AttachmentsSection()
         self.sections_area.add_widget(self.attachments_section)
 
+        self.patient_section.bind_controller(controller)
+        self.procedure_section.bind_controller(controller)
+        self.clinical_history_section.bind_controller(controller)
+        self.investigations_section.bind_controller(controller)
+        controller.saved.connect(self._on_saved)
+
         self._set_has_open_summary(False)
+
+    def load_summary(self, summary_id):
+        """Loads a real summary from the DB through the controller and
+        populates every section. Distinct from set_current_patient(),
+        which is still fixture-driven until the patient list is wired to
+        the real DB (a later chunk)."""
+        summary = self.controller.load(summary_id)
+        self.patient_section.populate(summary)
+        self.procedure_section.populate(summary)
+        self.clinical_history_section.populate(summary)
+        self.investigations_section.populate(summary, self.controller.investigations)
+
+        self._name_label.setText(summary.patient_name or "(unnamed)")
+        self._meta_label.setText(f"BHT {summary.bht_number} · Ward {summary.ward or ''}")
+        self._set_has_open_summary(True)
+        self._save_state_label.setText("Not saved")
+        return summary
+
+    def _on_saved(self):
+        now = datetime.datetime.now().strftime("%H:%M")
+        self._save_state_label.setText(f"✓ Saved {now}")
 
     def _build_action_bar(self):
         bar = QFrame()
@@ -124,7 +155,7 @@ class Editor(QWidget):
         pass  # TODO(printing chunk): app/printing/layout.py + printer.py don't exist yet.
 
     def _on_save(self):
-        pass  # TODO(db chunk): app/ui/editor_controller.py + app/db/summaries.py don't exist yet.
+        self.controller.flush()
 
     def _on_duplicate(self):
         pass  # TODO(db chunk): needs a real summary to copy.

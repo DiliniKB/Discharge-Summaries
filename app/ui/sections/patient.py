@@ -112,6 +112,37 @@ class PatientSection(CollapsibleSection):
         dates_row.addStretch()
         self.body_layout.addLayout(dates_row)
 
+    def bind_controller(self, controller):
+        """Wires every field's blur to controller.set_field(). Called once
+        by Editor after construction — see app/ui/editor_controller.py."""
+        self.name_input.editingFinished.connect(lambda: controller.set_field("patient_name", self.name_input.text()))
+        self.age_input.editingFinished.connect(lambda: controller.set_field("age", int(self.age_input.text()) if self.age_input.text() else None))
+        self.sex_input.currentTextChanged.connect(lambda text: controller.set_field("sex", text))
+        self.bht_input.editingFinished.connect(lambda: controller.set_field("bht_number", self.bht_input.text()))
+        self.ward_input.editingFinished.connect(lambda: controller.set_field("ward", self.ward_input.text()))
+        self.telephone_input.editingFinished.connect(lambda: controller.set_field("telephone", self.telephone_input.text()))
+        self.blood_group_input.currentTextChanged.connect(lambda text: controller.set_field("blood_group", text))
+        self.admission_date.value_changed.connect(lambda iso: controller.set_field("date_admission", iso))
+        self.surgery_date.value_changed.connect(lambda iso: controller.set_field("date_surgery", iso))
+        self.discharge_date.value_changed.connect(lambda iso: controller.set_field("date_discharge", iso))
+
+    def populate(self, summary):
+        """Fills every field from a Summary — the reverse of bind_controller.
+        Setting text programmatically here doesn't itself trigger a save
+        (setText() doesn't fire editingFinished, and a combobox's
+        currentTextChanged firing is harmless — the controller's own diff
+        guard sees it matches the just-loaded snapshot and no-ops)."""
+        self.name_input.setText(summary.patient_name)
+        self.age_input.setText(str(summary.age) if summary.age is not None else "")
+        self.sex_input.setCurrentText(summary.sex or "")
+        self.bht_input.setText(summary.bht_number)
+        self.ward_input.setText(summary.ward or "")
+        self.telephone_input.setText(summary.telephone or "")
+        self.blood_group_input.setCurrentText(summary.blood_group or "")
+        self.admission_date.set_iso(summary.date_admission or "")
+        self.surgery_date.set_iso(summary.date_surgery or "")
+        self.discharge_date.set_iso(summary.date_discharge or "")
+
     def _line_edit(self, max_width=None):
         box = QLineEdit()
         box.setMinimumHeight(theme.INPUT_HEIGHT_PX)
