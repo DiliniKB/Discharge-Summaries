@@ -158,6 +158,20 @@ def build_stylesheet():
         border: 2px solid {PRIMARY};
     }}
 
+    QFrame#PatientCard {{
+        background: {SURFACE};
+        border: none;
+        border-bottom: 1px solid {BORDER};
+        border-left: 3px solid transparent;
+    }}
+    QFrame#PatientCard:hover {{
+        background: {BG};
+    }}
+    QFrame#PatientCard[selected="true"] {{
+        background: {PRIMARY_TINT};
+        border-left: 3px solid {PRIMARY};
+    }}
+
     QScrollArea {{
         border: none;
     }}

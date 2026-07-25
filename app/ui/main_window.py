@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
 
 from app import theme
 from app.models import Doctor
+from app.ui.editor import Editor
+from app.ui.patient_list import PatientList
 
 HEADER_HEIGHT = 56
 LIST_PANE_WIDTH = 280
@@ -60,8 +62,10 @@ class MainWindow(QMainWindow):
         self.list_pane = self._build_list_pane()
         body_layout.addWidget(self.list_pane)
 
-        self.editor_pane = self._build_editor_pane()
-        body_layout.addWidget(self.editor_pane, stretch=1)
+        self.editor = Editor()
+        body_layout.addWidget(self.editor, stretch=1)
+
+        self.patient_list.patient_selected.connect(self.editor.set_current_patient)
 
     def _build_header(self):
         header = QFrame()
@@ -100,29 +104,10 @@ class MainWindow(QMainWindow):
         pane.setFixedWidth(LIST_PANE_WIDTH)
 
         layout = QVBoxLayout(pane)
-        layout.setContentsMargins(
-            theme.SECTION_PADDING, theme.SECTION_PADDING, theme.SECTION_PADDING, theme.SECTION_PADDING
-        )
+        layout.setContentsMargins(0, 0, 0, 0)
 
-        # Placeholder — New Card button, search, and patient cards land in chunks 6-7.
-        placeholder = QLabel("(patient list — chunk 6)")
-        placeholder.setObjectName("Muted")
-        layout.addWidget(placeholder)
-        layout.addStretch()
-        return pane
-
-    def _build_editor_pane(self):
-        pane = QWidget()
-        layout = QVBoxLayout(pane)
-        layout.setContentsMargins(
-            theme.SECTION_PADDING, theme.SECTION_PADDING, theme.SECTION_PADDING, theme.SECTION_PADDING
-        )
-
-        # Placeholder — action bar + sections land in chunks 8-13.
-        placeholder = QLabel("(editor — chunks 8-13)")
-        placeholder.setObjectName("Muted")
-        layout.addWidget(placeholder)
-        layout.addStretch()
+        self.patient_list = PatientList()
+        layout.addWidget(self.patient_list)
         return pane
 
 
