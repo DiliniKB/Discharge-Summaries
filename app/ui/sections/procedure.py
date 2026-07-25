@@ -4,10 +4,11 @@ Template picker lives in the section HEADER (▼ PROCEDURE  [Template ▾]),
 not the body — matching the spec's layout exactly, not just its field list.
 
 Templates insert, they don't link (docs/decisions.md): selecting one copies
-fixture text into Steps and resets the picker — an action, not a
-persistent selection. No real templates table yet (DB-layer chunk), so
-this uses fixture data the same way the doctor dropdown and patient list
-fixtures do.
+the template's body into Steps and resets the picker — an action, not a
+persistent selection. Templates come from the real DB (app/db/templates.py)
+via set_templates(), called once by MainWindow after querying it — this
+section doesn't own a DB connection itself, same reasoning as the doctor
+dropdown in main_window.py.
 """
 
 from PySide6.QtCore import Qt
@@ -20,38 +21,15 @@ from app.ui.widgets.labeled import LabeledField
 
 TEMPLATE_PLACEHOLDER = "Insert template…"
 
-FIXTURE_TEMPLATES = {
-    "Thyroid lobectomy": (
-        "1. GA induced, patient supine, neck extended.\n"
-        "2. Collar incision, subplatysmal flaps raised.\n"
-        "3. Strap muscles separated in the midline.\n"
-        "4. Affected lobe mobilised, isthmus divided.\n"
-        "5. Haemostasis secured, wound closed in layers."
-    ),
-    "Complete thyroidectomy": (
-        "1. GA induced, patient supine, neck extended.\n"
-        "2. Collar incision, subplatysmal flaps raised.\n"
-        "3. Both lobes mobilised and delivered.\n"
-        "4. Parathyroids identified and preserved.\n"
-        "5. Haemostasis secured, wound closed in layers."
-    ),
-    "Total mastectomy": (
-        "1. GA induced, patient supine, arm abducted.\n"
-        "2. Elliptical incision around the breast.\n"
-        "3. Skin flaps raised, breast tissue excised off pectoralis fascia.\n"
-        "4. Haemostasis secured, drain placed.\n"
-        "5. Wound closed in layers."
-    ),
-}
-
 
 class ProcedureSection(CollapsibleSection):
     def __init__(self, parent=None):
         super().__init__(title="Procedure", collapsed=False, parent=parent)
 
+        self._templates_by_name = {}
+
         self.template_picker = QComboBox()
         self.template_picker.addItem(TEMPLATE_PLACEHOLDER)
-        self.template_picker.addItems(sorted(FIXTURE_TEMPLATES.keys()))
         self.template_picker.setMaximumWidth(200)
         self.template_picker.setFocusPolicy(Qt.StrongFocus)  # macOS skips comboboxes on Tab by default; force it explicitly
         self.template_picker.currentIndexChanged.connect(self._on_template_selected)
@@ -70,6 +48,16 @@ class ProcedureSection(CollapsibleSection):
 
         self.steps_input = AutoGrowTextEdit(min_lines=3, max_lines=6)
         self.body_layout.addWidget(LabeledField("Procedure Steps", self.steps_input))
+
+    def set_templates(self, templates):
+        """templates: list of app.models.Template (active ones — see
+        app/db/templates.py list_active())."""
+        self._templates_by_name = {t.name: t.body for t in templates}
+        self.template_picker.blockSignals(True)  # avoid firing _on_template_selected while rebuilding the list
+        self.template_picker.clear()
+        self.template_picker.addItem(TEMPLATE_PLACEHOLDER)
+        self.template_picker.addItems(sorted(self._templates_by_name.keys()))
+        self.template_picker.blockSignals(False)
 
     def _on_template_selected(self, index):
         if index <= 0:  # the placeholder itself, not a real template
@@ -92,7 +80,7 @@ class ProcedureSection(CollapsibleSection):
                 self.template_picker.setCurrentIndex(0)
                 return
 
-        self.steps_input.setPlainText(FIXTURE_TEMPLATES[name])
+        self.steps_input.setPlainText(self._templates_by_name[name])
         self.template_picker.setCurrentIndex(0)  # action, not a persistent selection
         # setPlainText() doesn't trigger editingFinished (no focus change
         # happened) — without this, Ctrl+S right after inserting a

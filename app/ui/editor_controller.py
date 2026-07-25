@@ -29,6 +29,10 @@ class EditorController(QObject):
         super().__init__(parent)
         self._conn = conn
         self.summary_id = None
+        # Set by MainWindow when the header dropdown changes. No login
+        # (CLAUDE.md) — this is the entire accountability mechanism:
+        # created_by/last_edited_by are the audit trail (docs/decisions.md).
+        self.current_doctor_id = None
         self._db_values = {}
         self._pending_fields = {}
         self._db_investigations = {}
@@ -41,7 +45,10 @@ class EditorController(QObject):
     def new_summary(self):
         """'+ New Card' — creates a blank record immediately, per
         docs/ui-spec.md §3.2 ('Creates a blank record and focuses the Name field')."""
-        created = summaries.create(self._conn, Summary())
+        created = summaries.create(
+            self._conn,
+            Summary(created_by=self.current_doctor_id, last_edited_by=self.current_doctor_id),
+        )
         self._load_snapshot(created)
         return created
 
@@ -105,11 +112,7 @@ class EditorController(QObject):
         and internally before switching to a different summary."""
         self._timer.stop()
         wrote_anything = False
-
-        if self._pending_fields:
-            summaries.update(self._conn, self.summary_id, **self._pending_fields)
-            self._pending_fields = {}
-            wrote_anything = True
+        fields_to_write = dict(self._pending_fields)
 
         if self._pending_investigations:
             for label, row in self._pending_investigations.items():
@@ -122,6 +125,21 @@ class EditorController(QObject):
                 self._db_investigations[label]["id"] = real_id
             self._pending_investigations = {}
             wrote_anything = True
+
+        if fields_to_write:
+            wrote_anything = True
+
+        # Editing an investigation still counts as editing the record, not
+        # just a summary-column change — last_edited_by should reflect
+        # that too, so it needs its own summaries.update() even when
+        # fields_to_write started empty.
+        if wrote_anything and self.current_doctor_id is not None:
+            fields_to_write["last_edited_by"] = self.current_doctor_id
+            self._db_values["last_edited_by"] = self.current_doctor_id
+
+        if fields_to_write:
+            summaries.update(self._conn, self.summary_id, **fields_to_write)
+            self._pending_fields = {}
 
         if wrote_anything:
             self.saved.emit()

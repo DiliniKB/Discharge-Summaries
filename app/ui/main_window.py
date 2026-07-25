@@ -20,8 +20,9 @@ from PySide6.QtWidgets import (
 )
 
 from app import theme
-from app.db import connection as db_connection
-from app.models import Doctor
+from app.db import app_meta, connection as db_connection
+from app.db import doctors as doctors_db
+from app.db import templates as templates_db
 from app.ui.editor import Editor
 from app.ui.editor_controller import EditorController
 from app.ui.patient_list import PatientList
@@ -30,16 +31,7 @@ HEADER_HEIGHT = 56
 LIST_PANE_WIDTH = 280
 MIN_WIDTH = 1280
 MIN_HEIGHT = 720
-
-# Fictional, hardcoded until app/db/doctors.py exists. Consultant first,
-# per docs/schema.md ("Consultant first, not alphabetical") — sort_order
-# reflects that, not alphabetisation.
-PLACEHOLDER_DOCTORS = [
-    Doctor(id=1, name="Dr. S. Herath", designation="SR Onco-surgery", sort_order=0),
-    Doctor(id=2, name="Dr. N. Ratnayake", designation="Consultant Surgeon", sort_order=1),
-    Doctor(id=3, name="Dr. P. Wickramasinghe", designation="Registrar", sort_order=2),
-    Doctor(id=4, name="Dr. A. Fonseka", designation="SHO", sort_order=3),
-]
+LAST_DOCTOR_KEY = "last_doctor_id"
 
 
 class MainWindow(QMainWindow):
@@ -73,6 +65,9 @@ class MainWindow(QMainWindow):
 
         self.editor = Editor(self._controller)
         body_layout.addWidget(self.editor, stretch=1)
+
+        templates_db.seed_if_empty(self._conn)
+        self.editor.procedure_section.set_templates(templates_db.list_active(self._conn))
 
         self.patient_list.patient_selected.connect(self.editor.load_summary)
         self.patient_list.new_card_button.clicked.connect(self._on_new_card)
@@ -133,14 +128,23 @@ class MainWindow(QMainWindow):
         layout.addWidget(title)
         layout.addStretch()
 
-        self._doctors = PLACEHOLDER_DOCTORS
-        self.selected_doctor = self._doctors[0]
-        # TODO(db chunk): default should be app_meta.last_doctor_id, not
-        # always the first doctor. No settings/persistence layer yet.
+        doctors_db.seed_if_empty(self._conn)
+        self._doctors = doctors_db.list_active(self._conn)
+
+        default_index = 0
+        last_id_str = app_meta.get(self._conn, LAST_DOCTOR_KEY)
+        if last_id_str is not None:
+            for i, d in enumerate(self._doctors):
+                if d.id == int(last_id_str):
+                    default_index = i
+                    break
+        self.selected_doctor = self._doctors[default_index]
+        self._controller.current_doctor_id = self.selected_doctor.id
 
         doctor_picker = QComboBox()
         doctor_picker.setEditable(False)  # dropdown-only by default in Qt — no readonly quirk to work around
         doctor_picker.addItems([d.name for d in self._doctors])
+        doctor_picker.setCurrentIndex(default_index)
         doctor_picker.setFixedWidth(220)
         doctor_picker.setFocusPolicy(Qt.StrongFocus)  # macOS skips comboboxes on Tab by default; force it explicitly
         doctor_picker.currentIndexChanged.connect(self._on_doctor_selected)
@@ -158,6 +162,8 @@ class MainWindow(QMainWindow):
 
     def _on_doctor_selected(self, index):
         self.selected_doctor = self._doctors[index]
+        self._controller.current_doctor_id = self.selected_doctor.id
+        app_meta.set(self._conn, LAST_DOCTOR_KEY, self.selected_doctor.id)
 
     def _build_list_pane(self):
         pane = QFrame()
