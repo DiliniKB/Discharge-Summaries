@@ -150,7 +150,7 @@ Handwritten on the sample card, meaning it was needed and the form lacked it. Ad
 
 ### 4.5 Text areas
 
-Procedure Steps and Management are multi-line, auto-growing to a 6-line cap then scrolling. Monospace is wrong here — use the body face.
+Procedure Steps, Management, and Histology Report are multi-line, auto-growing to a 6-line cap then scrolling. Monospace is wrong here — use the body face. Histology reports are routinely multi-paragraph pathology text (docs/schema.md: "often filled in after discharge") — a single-line box forces internal horizontal scrolling to review, the same problem fixed for Clinical History.
 
 ---
 

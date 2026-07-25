@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from app import theme
 from app.ui.sections.clinical_history import ClinicalHistorySection
+from app.ui.sections.investigations import InvestigationsSection
 from app.ui.sections.patient import PatientSection
 from app.ui.sections.procedure import ProcedureSection
 from app.ui.widgets.scrollframe import ScrollFrame
@@ -50,7 +51,10 @@ class Editor(QWidget):
         self.clinical_history_section = ClinicalHistorySection()
         self.sections_area.add_widget(self.clinical_history_section)
 
-        placeholder = QLabel("(remaining sections — chunks 12-13)")
+        self.investigations_section = InvestigationsSection()
+        self.sections_area.add_widget(self.investigations_section)
+
+        placeholder = QLabel("(remaining section — chunk 13, Attachments)")
         placeholder.setObjectName("Muted")
         placeholder.setContentsMargins(theme.SECTION_PADDING, theme.SECTION_PADDING, 0, 0)
         self.sections_area.add_widget(placeholder)
