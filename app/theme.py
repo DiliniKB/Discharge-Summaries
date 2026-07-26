@@ -82,6 +82,10 @@ def build_stylesheet():
         color: {TEXT_MUTED};
         font-size: {SIZE_METADATA}px;
     }}
+    QLabel#Danger {{
+        color: {DANGER};
+        font-size: {SIZE_METADATA}px;
+    }}
     QLabel#SectionHeader {{
         color: {TEXT};
         font-size: {SIZE_SECTION_HEADER}px;

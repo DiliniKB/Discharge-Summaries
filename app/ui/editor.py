@@ -70,6 +70,7 @@ class Editor(QWidget):
         self.procedure_section.bind_controller(controller)
         self.clinical_history_section.bind_controller(controller)
         self.investigations_section.bind_controller(controller)
+        self.attachments_section.bind_controller(controller)
         controller.saved.connect(self._on_saved)
 
         self._set_has_open_summary(False)
@@ -82,6 +83,7 @@ class Editor(QWidget):
         self.procedure_section.populate(summary)
         self.clinical_history_section.populate(summary)
         self.investigations_section.populate(summary, self.controller.investigations)
+        self.attachments_section.populate()
 
         self._name_label.setText(summary.patient_name or "(unnamed)")
         self._meta_label.setText(f"BHT {summary.bht_number} · Ward {summary.ward or ''}")
@@ -146,6 +148,7 @@ class Editor(QWidget):
         self.print_button.setEnabled(has_summary)
         self.save_button.setEnabled(has_summary)
         self.overflow_button.setEnabled(has_summary)
+        self.attachments_section.set_enabled(has_summary)
         self._save_state_label.setText("Not saved" if has_summary else "")
 
     def _on_print(self):

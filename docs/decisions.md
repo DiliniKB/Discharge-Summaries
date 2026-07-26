@@ -164,6 +164,12 @@ The paper form allocates fixed vertical space to fields that are usually blank. 
 
 Blobs bloat the database file, slowing every query and making the on-exit backup copy expensive. Imports capped at 5 MB with images resized — a 40 MB phone photo of a histology report is a realistic way to exhaust memory here.
 
+**Resizing uses `QImage` (PySide6), not Pillow.** Pillow is present in this environment only as a transitive dependency (pulled in by ReportLab) — it isn't in `requirements.txt`, and `build.spec` explicitly curates what actually ships in the PyInstaller bundle. Relying on an undeclared transitive import would be fragile. `QImage(path)` doubles as the "is this actually a readable image" check: if it loads and exceeds 1600px on its longest side, scale it down; if `.isNull()`, treat the file as a non-image and copy it through unchanged (PDF, DOCX, etc.) rather than guessing from the file extension.
+
+**Stored filenames are generated (`uuid4().hex` + extension), not the original name.** Two different attachments named `report.pdf` — a common case with scanned lab reports — would otherwise collide on disk. The original name is kept in the `filename` column for display; only the on-disk path is anonymised.
+
+**Removing an attachment is a hard delete with no confirmation.** Unlike `summaries` (soft-deleted, 30-day purge, confirm-by-typing-the-name), the `attachments` table has no `deleted_at` column. A single attached file is a low-stakes, single-item action — closer to investigations' existing ad-hoc-row remove (also no confirmation) than to deleting a whole clinical record.
+
 ---
 
 ## Soft delete with a 30-day purge

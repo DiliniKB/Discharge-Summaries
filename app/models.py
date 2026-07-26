@@ -29,6 +29,16 @@ class Template:
 
 
 @dataclass
+class Attachment:
+    id: int
+    summary_id: int
+    filename: str
+    stored_path: str
+    size_bytes: int
+    added_at: str
+
+
+@dataclass
 class Summary:
     """Mirrors the summaries table exactly — see docs/schema.md. id=None
     means not yet saved (a blank "+ New Card" that hasn't hit the DB)."""

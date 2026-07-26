@@ -177,6 +177,34 @@ def test_round_trip_reload_redisplays_everything_correctly(db_conn, qapp):
     fresh_editor.close()
 
 
+def test_attachment_added_through_the_real_editor_survives_a_reload(db_conn, qapp, tmp_path):
+    editor, controller = _make_editor(db_conn)
+    created = controller.new_summary()
+    editor.load_summary(created.id)
+    qapp.processEvents()
+
+    source = tmp_path / "histology.pdf"
+    source.write_bytes(b"a real small attachment file")
+    editor.attachments_section.set_enabled(True)
+    editor.attachments_section._import_paths([str(source)])
+    qapp.processEvents()
+
+    assert len(editor.attachments_section.rows) == 1
+    assert len(controller.list_attachments()) == 1
+
+    fresh_controller = EditorController(db_conn)
+    fresh_editor = Editor(fresh_controller)
+    fresh_editor.show()
+    fresh_editor.load_summary(created.id)
+    qapp.processEvents()
+
+    assert len(fresh_editor.attachments_section.rows) == 1
+    assert fresh_editor.attachments_section.rows[0].attachment.filename == "histology.pdf"
+
+    editor.close()
+    fresh_editor.close()
+
+
 def test_save_button_force_flushes_with_no_wait(db_conn, qapp):
     editor, controller = _make_editor(db_conn)
     created = controller.new_summary()

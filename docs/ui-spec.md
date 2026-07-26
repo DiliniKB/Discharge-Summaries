@@ -122,7 +122,7 @@ Scrollable region (`Canvas` + `Scrollbar`) since content exceeds 768 px.
 | Procedure | Open | Procedure title, Surgical team, Indication, Procedure steps, template picker |
 | Clinical History | **Collapsed** | Presenting Complaint, Past Medical History, Past Surgical History, Allergies, Examination, Findings |
 | Investigations & Management | Open | Investigation grid, Management, Histology Report |
-| Attachments | Collapsed | File list + drop zone |
+| Attachments | Collapsed | File list + drop zone — multi-select file picker or drag-and-drop, both feeding one shared import path. Each row shows filename, size, and a remove button. Files over 5 MB are rejected with an inline message (`docs/decisions.md`); images are resized to a 1600 px max dimension on import. Disabled (picker and drag-drop both) until a summary is open. Header counter reads `"N files"`, live. |
 
 Collapsed headers show a fill count (`2 of 6 filled`) so nothing is invisible. All fields exist and print regardless of section state.
 

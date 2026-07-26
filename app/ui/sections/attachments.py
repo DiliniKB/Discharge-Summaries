@@ -1,29 +1,57 @@
-"""Attachments section. Collapsed by default, empty-state only. See
-docs/ui-spec.md §3.3.
+"""Attachments section. Collapsed by default. See docs/ui-spec.md §3.3.
 
-Deliberately a shell, not a full feature: real file handling needs
-app/db/attachments.py (paths in DB, files on disk per docs/decisions.md)
-and the 5MB-cap-and-resize rule from CLAUDE.md, neither of which exists
-yet. Add File is a documented no-op, same treatment as Print/Save in
-app/ui/editor.py — wiring even a "harmless" file dialog now would mean
-building on top of a storage layer that isn't there.
+Multi-select file picker or drag-and-drop onto the drop zone, both feeding
+one shared handler (_import_paths) so there's exactly one code path.
+Files are capped at 5 MB and images resized on import (CLAUDE.md hard
+rule #9, app/util/attachments.py). Add/remove write straight through
+EditorController — see docs/decisions.md.
 """
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QToolButton, QVBoxLayout, QWidget
 
 from app import theme
 from app.ui.widgets.collapsible import CollapsibleSection
+from app.util.attachments import AttachmentTooLargeError, format_size
+
+
+class _AttachmentRow(QWidget):
+    """One attached file: name, size, remove button. Mirrors
+    investigations.py's _AdHocRow — constructor-injected on_remove
+    callback passing itself, so the parent doesn't track index/id mapping."""
+
+    def __init__(self, attachment, on_remove, parent=None):
+        super().__init__(parent)
+        self.attachment = attachment
+        self._on_remove = on_remove
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(theme.FIELD_GAP)
+
+        name_label = QLabel(attachment.filename)
+        layout.addWidget(name_label, stretch=1)
+
+        size_label = QLabel(format_size(attachment.size_bytes))
+        size_label.setObjectName("Muted")
+        layout.addWidget(size_label)
+
+        remove_button = QToolButton()
+        remove_button.setText("✕")
+        remove_button.clicked.connect(lambda: self._on_remove(self))
+        layout.addWidget(remove_button)
 
 
 class AttachmentsSection(CollapsibleSection):
     def __init__(self, parent=None):
         super().__init__(title="Attachments", collapsed=True, parent=parent)
-        self.set_counter("0 files")
+        self._controller = None
+        self.rows = []
+        self.setAcceptDrops(True)
 
-        drop_zone = QFrame()
-        drop_zone.setObjectName("DropZone")
-        zone_layout = QVBoxLayout(drop_zone)
+        self.drop_zone = QFrame()
+        self.drop_zone.setObjectName("DropZone")
+        zone_layout = QVBoxLayout(self.drop_zone)
         zone_layout.setAlignment(Qt.AlignCenter)
         zone_layout.setContentsMargins(theme.SECTION_PADDING, theme.SECTION_PADDING * 2, theme.SECTION_PADDING, theme.SECTION_PADDING * 2)
         zone_layout.setSpacing(theme.SPACING_UNIT * 2)
@@ -40,10 +68,96 @@ class AttachmentsSection(CollapsibleSection):
 
         self.add_file_button = QPushButton("+ Add File")
         self.add_file_button.setObjectName("SecondaryCompact")
-        self.add_file_button.clicked.connect(self._on_add_file)
+        self.add_file_button.clicked.connect(self._on_add_file_clicked)
         zone_layout.addWidget(self.add_file_button, alignment=Qt.AlignCenter)
 
-        self.body_layout.addWidget(drop_zone)
+        self.body_layout.addWidget(self.drop_zone)
 
-    def _on_add_file(self):
-        pass  # TODO(attachments chunk): file picker, 5MB cap, resize, app/db/attachments.py — none exist yet.
+        self._error_label = QLabel("")
+        self._error_label.setObjectName("Danger")
+        self._error_label.setWordWrap(True)
+        self._error_label.setVisible(False)
+        self.body_layout.addWidget(self._error_label)
+
+        self.rows_layout = QVBoxLayout()
+        self.rows_layout.setSpacing(theme.FIELD_GAP)
+        self.body_layout.addLayout(self.rows_layout)
+
+        self._update_counter()
+        self.set_enabled(False)
+
+    def bind_controller(self, controller):
+        self._controller = controller
+
+    def populate(self):
+        """Rebuilds the row list from the DB (via the controller) — no
+        summary argument, since attachments aren't a Summary field."""
+        for row_widget in list(self.rows):
+            self._remove_row_widget(row_widget)
+        for attachment in self._controller.list_attachments():
+            self._add_row_widget(attachment)
+        self._update_counter()
+
+    def set_enabled(self, enabled):
+        """Disables adding files (button + drag-drop) when no summary is
+        open — mirrors Editor._set_has_open_summary disabling Print/Save."""
+        self.add_file_button.setEnabled(enabled)
+        self.setAcceptDrops(enabled)
+
+    def _add_row_widget(self, attachment):
+        row = _AttachmentRow(attachment, on_remove=self._on_remove_row)
+        self.rows_layout.addWidget(row)
+        self.rows.append(row)
+
+    def _remove_row_widget(self, row):
+        self.rows.remove(row)
+        row.setParent(None)
+        row.deleteLater()
+
+    def _update_counter(self):
+        count = len(self.rows)
+        self.set_counter(f"{count} file" if count == 1 else f"{count} files")
+
+    def _on_add_file_clicked(self):
+        # An explicit QFileDialog instance, not the static
+        # getOpenFileNames() convenience method — that one gives no
+        # handle to call raise_()/activateWindow() before it opens. On
+        # macOS the native dialog can open behind the main window without
+        # grabbing focus, which looks exactly like "the button does
+        # nothing" (the same class of window-activation bug this app has
+        # hit before — see tests/test_polish.py, tests/test_section_patient.py).
+        dialog = QFileDialog(self, "Add attachment")
+        dialog.setFileMode(QFileDialog.ExistingFiles)
+        dialog.raise_()
+        dialog.activateWindow()
+        if dialog.exec():
+            paths = dialog.selectedFiles()
+            if paths:
+                self._import_paths(paths)
+
+    def _import_paths(self, paths):
+        self._error_label.setVisible(False)
+        errors = []
+        for path in paths:
+            try:
+                self._controller.add_attachment(path)
+            except AttachmentTooLargeError as e:
+                errors.append(str(e))
+        self.populate()
+        if errors:
+            self._error_label.setText("\n".join(errors))
+            self._error_label.setVisible(True)
+
+    def _on_remove_row(self, row):
+        self._controller.remove_attachment(row.attachment.id)
+        self.populate()
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
+        if paths:
+            self._import_paths(paths)
+        event.acceptProposedAction()

@@ -11,11 +11,14 @@ module is tested standalone against a real DB.
 """
 
 import dataclasses
+import os
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from app.db import attachments as attachments_db
 from app.db import summaries
 from app.models import Summary
+from app.util import attachments as attachment_files
 
 COALESCE_MS = 200
 
@@ -106,6 +109,38 @@ class EditorController(QObject):
         """Read-only snapshot of the current summary's investigation rows,
         keyed by label — used by InvestigationsSection.populate()."""
         return dict(self._db_investigations)
+
+    def add_attachment(self, source_path):
+        """Adding a file counts as editing the record, same as an
+        investigation change — stamps last_edited_by even though no
+        Summary column was touched. Writes immediately: this is a
+        discrete action (a file dialog closing), not rapid typing, so it
+        bypasses the diff/debounce path entirely."""
+        if self.summary_id is None:
+            return
+        stored_path, size_bytes = attachment_files.save_attachment_file(source_path, self.summary_id)
+        attachments_db.add(self._conn, self.summary_id, os.path.basename(source_path), stored_path, size_bytes)
+        self._stamp_last_edited_by()
+        self.saved.emit()
+
+    def remove_attachment(self, attachment_id):
+        row = attachments_db.get(self._conn, attachment_id)
+        if row is None:
+            return
+        attachment_files.delete_attachment_file(row.stored_path)
+        attachments_db.delete(self._conn, attachment_id)
+        self._stamp_last_edited_by()
+        self.saved.emit()
+
+    def list_attachments(self):
+        if self.summary_id is None:
+            return []
+        return attachments_db.list_for_summary(self._conn, self.summary_id)
+
+    def _stamp_last_edited_by(self):
+        if self.current_doctor_id is not None:
+            summaries.update(self._conn, self.summary_id, last_edited_by=self.current_doctor_id)
+            self._db_values["last_edited_by"] = self.current_doctor_id
 
     @property
     def conn(self):
