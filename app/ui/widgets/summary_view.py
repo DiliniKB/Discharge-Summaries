@@ -6,10 +6,17 @@ shown as "—" — same "omit if nothing to show" rule the printed card
 already follows (app/printing/layout.py).
 """
 
-from PySide6.QtWidgets import QLabel
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
+from app import theme
 from app.printing import layout as print_layout
 from app.ui.widgets.labeled import LabeledField
+from app.util.attachments import (
+    AttachmentMissingError,
+    AttachmentOpenUnsupportedError,
+    format_size,
+    open_attachment_file,
+)
 
 _ADMISSION_TEXT_FIELDS = [
     ("Telephone", "telephone"),
@@ -31,7 +38,7 @@ def _add_section_header(scroll_frame, heading):
     scroll_frame.add_widget(header)
 
 
-def populate_summary_view(scroll_frame, summary, investigations, doctors_by_id):
+def populate_summary_view(scroll_frame, summary, investigations, doctors_by_id, attachments=()):
     """Clears nothing — caller is responsible for starting from an empty
     scroll_frame.body_layout (ScrollFrame.add_widget only ever appends)."""
     name_label = QLabel(summary.patient_name or "(unnamed)")
@@ -95,6 +102,55 @@ def populate_summary_view(scroll_frame, summary, investigations, doctors_by_id):
         empty_label = QLabel("No investigations or management recorded.")
         empty_label.setObjectName("Muted")
         scroll_frame.add_widget(empty_label)
+
+    # Omitted entirely when there are none, same rule as every other
+    # section here — a record with no files shouldn't show an empty
+    # "ATTACHMENTS" heading followed by nothing.
+    if attachments:
+        _add_section_header(scroll_frame, "ATTACHMENTS")
+        for attachment in attachments:
+            scroll_frame.add_widget(_build_attachment_row(attachment))
+
+
+def _build_attachment_row(attachment):
+    """filename · size, plus an Open button that hands off to the OS's
+    default viewer (app/util/attachments.py) — no in-app preview to
+    build or maintain, same choice as app/ui/sections/attachments.py's
+    editor row. Read-only view, so no remove button here."""
+    wrap = QWidget()
+    wrap_layout = QVBoxLayout(wrap)
+    wrap_layout.setContentsMargins(0, 0, 0, 0)
+    wrap_layout.setSpacing(theme.SPACING_UNIT)
+
+    top_row = QHBoxLayout()
+    top_row.setContentsMargins(0, 0, 0, 0)
+    top_row.setSpacing(theme.FIELD_GAP)
+    text_label = QLabel(f"{attachment.filename}  ·  {format_size(attachment.size_bytes)}")
+    text_label.setWordWrap(True)
+    top_row.addWidget(text_label, stretch=1)
+
+    error_label = QLabel("")
+    error_label.setObjectName("Danger")
+    error_label.setWordWrap(True)
+    error_label.setVisible(False)
+
+    open_button = QPushButton("Open")
+    open_button.setObjectName("SecondaryCompact")
+    open_button.clicked.connect(lambda: _open_attachment(error_label, attachment))
+    top_row.addWidget(open_button)
+
+    wrap_layout.addLayout(top_row)
+    wrap_layout.addWidget(error_label)
+    return wrap
+
+
+def _open_attachment(error_label, attachment):
+    error_label.setVisible(False)
+    try:
+        open_attachment_file(attachment.stored_path)
+    except (AttachmentMissingError, AttachmentOpenUnsupportedError) as e:
+        error_label.setText(str(e))
+        error_label.setVisible(True)
 
 
 def _format_timestamp(iso_timestamp):

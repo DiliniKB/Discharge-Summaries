@@ -184,7 +184,15 @@ class Editor(QWidget):
             return
         self._commit_focused_field()
         self.controller.flush()  # printed content must match what's about to be saved, not stale field values
-        with tempfile.TemporaryDirectory() as tmp_dir:
+        # ignore_cleanup_errors: os.startfile(path, "print") (app/printing/printer.py)
+        # hands the PDF to whatever the shell's default handler is and
+        # returns immediately — that external viewer/print spooler can
+        # still hold the file open by the time this `with` exits, and
+        # Windows (unlike POSIX) refuses to delete an open file
+        # (WinError 32). That's an external process's timing, not
+        # something this app controls or a real failure — cleanup best-
+        # effort, don't let it interrupt the doctor closing the dialog.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
             dialog = PrintPreviewDialog(
                 self.controller.conn, self.controller.summary_id, tmp_dir, self.controller.current_doctor_id, self
             )

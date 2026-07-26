@@ -256,6 +256,24 @@ The PDF is already sitting on disk the moment the dialog opens (CLAUDE.md: "gene
 
 ---
 
+## Temp PDF cleanup doesn't block on a still-open external viewer (WinError 32)
+
+**Decision:** both places that wrap a `PrintPreviewDialog` in `tempfile.TemporaryDirectory()` (`app/ui/editor.py`'s `_on_print`, `app/ui/dialogs/advanced_search.py`'s `_on_print`) now pass `ignore_cleanup_errors=True`.
+
+`app/printing/printer.py` hands the rendered PDF to `os.startfile(path, "print")` — the OS's own default handler (e.g. the system PDF viewer) opens it to actually print, and can still hold the file open by the time the doctor closes the Print Preview dialog and the `with` block tries to delete the temp directory. Windows (unlike POSIX) refuses to delete an open file, raising `WinError 32`. That's the external viewer's own timing, not a bug in this app and not something it can force closed — the fix is to make the best-effort temp-file cleanup tolerate that instead of raising and breaking the "close the print window" action a doctor is mid-task on. Confirmed reproducible: the crash was reported closing Print Preview right after Print, i.e. exactly this race.
+
+---
+
+## A button click doesn't reliably blur a still-focused field — commit before reading state
+
+**Decision:** `Editor._commit_focused_field()` force-blurs (`clearFocus()`) whatever field currently has focus, scoped to widgets inside the Editor. Called before `flush()` in `_on_save`, `_on_print`, `_on_duplicate`, and before `controller.load()` in `load_summary()` (switching to a different record).
+
+Found by testing: clicking Save (or Print, or a different patient card) right after typing into a field, without first tabbing or clicking elsewhere, does not reliably move keyboard focus away from a `QLineEdit` on this platform (buttons are click-only for focus purposes on macOS's Cocoa HI guideline, and this codebase can't assume Windows behaves differently without a from-source verification of its own). Without a blur, `editingFinished` never fires, so `controller.set_field()`/`set_investigation()` never even sees the just-typed value — `flush()` then has nothing pending to write, and the record silently ends up missing whatever was still focused, while the UI (pre-fix) still claimed "Saved". This is a real data-loss bug, not just a cosmetic one, and it's also why the abnormal-lab-value styling (`app/ui/sections/investigations.py`) looked "stuck" — that recalculation hangs off the same `editingFinished` signal.
+
+**Related:** `Editor._on_save()` now always calls `_on_saved()` (updates the "✓ Saved" label) after `flush()`, not only when `flush()` found something pending. `flush()` only emits its `saved` signal when it actually wrote something — right after an autosave already flushed the same edit, or on a freshly-created card nothing's been typed into yet, clicking Save found nothing pending and left the label stuck on "Not saved" even though the record was fully persisted. An explicit Save click is a confirmation of the current state either way.
+
+---
+
 ## Paginated list queries
 
 **Decision:** `LIMIT 50` on the list pane, full record loaded only on selection.
@@ -284,6 +302,16 @@ With a few hundred summaries, loading everything would work fine today and degra
 
 **View panel leads with identity, hides blanks, and shows investigation values.** First pass just dumped every field in a flat list, including blank ones shown as "—" — accurate but not how a doctor actually scans a record. Reworked to: an identity line up top (name, age/sex, BHT, ward) so "is this the right patient?" is answered in one glance, not by reading a field labelled "Patient Name" partway down a list; doctor attribution (created/last edited by, with timestamps) since this dialog exists specifically to search across doctors; blank fields omitted entirely rather than shown as empty, reusing the same "omit if nothing to show" rule `app/printing/layout.py` already applies to the printed card (`has_clinical_history`, `format_investigations`, `DETAIL_FIELDS`/`CLINICAL_HISTORY_FIELDS`/`TAIL_FIELDS`) rather than re-deriving it; and investigation values shown inline, which the first pass omitted entirely — a real gap, since lab results are exactly what a doctor scanning a record wants to see.
 
+**Attachments were missing from both view panel and Full View entirely — added as filename + size + Open.** Genuine gap: a doctor searching a record has no way to know it even has a wound photo or a pathology PDF attached without opening it in the editor first. Both `populate_summary_view` (quick-view panel) and `SummaryFullViewDialog` now take an `attachments` list (fetched via `attachments_db.list_for_summary`) and append an ATTACHMENTS section listing `filename · size` + an Open button per file — same read-only, glance-first shape as everything else in these views. Omitted entirely (not a muted "none" line) when there are none, since most records won't have any and a near-permanent empty section would be noise.
+
+---
+
+## Previewing an attachment opens it in the OS's default viewer — no in-app preview
+
+**Decision:** `app.util.attachments.open_attachment_file(stored_relative_path)` calls `os.startfile(path)`, handing the file to whatever the OS has set as the default handler for its type (Photos, Edge, Acrobat, etc). Wired to an "Open" button on every attachment row — the editor's own `AttachmentsSection`, Advanced Search's quick-view panel, and the Full View dialog all use it (the latter two reuse `app/ui/widgets/summary_view.py`'s `_build_attachment_row`, so the open-file wiring exists in exactly one place).
+
+Rejected an in-app image preview (thumbnail + click-to-enlarge dialog): it only helps images, still needs the "open externally" fallback for PDFs/DOCX anyway, and is real UI to build and maintain (thumbnail rendering, memory for decoded images on a 4GB machine) for a need `os.startfile` already covers with one line. Same "warn, don't block" shape as the rest of this app: `open_attachment_file` raises `AttachmentMissingError` (file no longer on disk) or `AttachmentOpenUnsupportedError` (dev/test runs on non-Windows, mirroring `printer.py`'s `PrintUnsupportedError`) rather than crashing — every caller catches both and shows an inline message instead.
+
 **Filter rows all use the same layout pattern; Search/Clear attach to the top row.** An earlier pass fixed cramped date-field spacing but left the panel feeling disorganized: the identity and keyword rows stretched edge-to-edge while the date row stayed half-width, and Search/Clear sat stranded on their own line below a mostly-empty row. Every row now uses the same `QHBoxLayout` + trailing `addStretch()` pattern for consistency, and the buttons moved onto the top (widest) row instead of floating below — a small `_button_row_aligned_with_inputs()` helper gives them a blank spacer label matching `LabeledField`'s own label-then-input structure, so they sit level with the inputs beside them rather than floating higher.
 
 ---
@@ -297,6 +325,8 @@ With a few hundred summaries, loading everything would work fine today and degra
 **Date-order warning (`app/util/validators.py`, `app/ui/sections/patient.py`).** `validate_date_order(admission, surgery, discharge)` compares the three ISO date strings as plain text (no parsing needed) and returns a warning for each out-of-order pair. A pair is only checked when both sides are filled — a blank date is never itself a warning. `PatientSection` shows the joined warning text in a hidden-by-default label below the dates row, on every date edit and on `populate()`. This is the `app/util/validators.py` module CLAUDE.md's layout named from the very start but never built.
 
 **Computed Advanced Search column widths (`app/ui/dialogs/advanced_search.py`).** The old `_COLUMN_WIDTHS` dict was hand-tuned by screenshot three separate times this project (clipped Actions buttons twice, a truncated header once). `_compute_column_widths(table)` replaces it, deriving BHT/Ward/Discharge Date/Created/Modified/Actions from real `QFontMetrics` against the actual content each column can hold — realistic-with-headroom digit samples for BHT/Ward, the widest string the fixed date/timestamp format can ever produce, and the three Actions button labels plus the QSS's own known padding/border for Actions. A font or DPI change on the target laptop can no longer silently reintroduce the clipping. **Doctor stays a fixed, documented judgment call** (90px) — display names are genuinely unbounded text, so there's no "widest sample" to compute from; truncation there is expected and acceptable.
+
+**A fourth clipping bug turned up after computing widths from font metrics alone — `QTableWidget::item`'s own QSS padding (`app/theme.py`, `padding: 6px {INPUT_PADDING_X}px`) eats `2*INPUT_PADDING_X` off a cell's usable width before any content is drawn, confirmed by measuring a real `setCellWidget()` widget's actual on-screen size against its column width, not assumed.** This applies to text items (they simply elide instead of visibly clipping) and to widget cells alike — the Actions column's buttons were being sized to exactly fit their own `sizeHint()`, then handed a cell 24px narrower than that. `COLUMN_WIDTH_PADDING` now includes this inset plus real breathing room on top of it (a first attempt added only breathing room with no inset, which exactly fit the sample text with zero slack and still clipped on real data). Fixing this pushed the Fixed columns' combined width up enough to squeeze the Stretch column (Patient Name) toward zero on the dialog's original 1200px width — `QHeaderView.setMinimumSectionSize` was tried and rejected here, since it floors *every* section, not just the Stretch one, and just inflated the Fixed columns further. The actual fix was sizing headroom: the dialog widened to 1260px (still comfortably under the target 1366×768 screen) and the splitter's initial table/view-panel split adjusted (1020/200) so Patient Name gets a reasonable width by construction instead of a floor fighting the other columns for space.
 
 ---
 

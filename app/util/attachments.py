@@ -12,6 +12,7 @@ check: if it loads, resize it; if not, treat the file as a non-image and
 copy it through unchanged (PDF, DOCX, etc.).
 """
 
+import os
 import shutil
 import uuid
 from pathlib import Path
@@ -28,6 +29,39 @@ class AttachmentTooLargeError(Exception):
     """Raised when a file, after any resizing, still exceeds
     MAX_ATTACHMENT_BYTES. Caller (the UI) catches this and shows a status
     message — same pattern as PrintUnsupportedError."""
+
+
+class AttachmentOpenUnsupportedError(RuntimeError):
+    """Raised when attempting to open a file on a non-Windows platform.
+    Same reasoning as app/printing/printer.py's PrintUnsupportedError —
+    the shipped app only ever runs on Windows (CLAUDE.md), so dev/test
+    runs on other platforms fail with a clear message instead of a
+    confusing AttributeError deep in os.startfile."""
+
+
+class AttachmentMissingError(RuntimeError):
+    """Raised when the stored file is no longer on disk. A caller
+    shouldn't hand os.startfile a path that doesn't exist — Windows'
+    own error for that is a generic, unhelpful shell dialog."""
+
+
+def open_attachment_file(stored_relative_path):
+    """Hands the file to whatever the OS has set as the default viewer for
+    its type — no in-app preview to build or maintain, and it works for
+    every attachment type (photo, PDF, DOCX), not just images. Warns via
+    a raised, catchable error rather than blocking anything — same "warn,
+    don't block" shape as every other validation in this app
+    (docs/decisions.md)."""
+    path = get_attachments_dir() / stored_relative_path
+    if not path.exists():
+        raise AttachmentMissingError(f"{path.name} is no longer on disk.")
+    if not hasattr(os, "startfile"):
+        raise AttachmentOpenUnsupportedError(
+            "Opening files requires os.startfile, which only exists on Windows. "
+            "This is expected when running on a dev machine — the shipped "
+            "app is Windows-only."
+        )
+    os.startfile(str(path))
 
 
 def save_attachment_file(source_path, summary_id):

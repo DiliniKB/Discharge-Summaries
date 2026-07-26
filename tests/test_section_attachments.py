@@ -3,7 +3,7 @@ EditorController — file picker, drag-drop, remove, 5MB cap."""
 
 from PySide6.QtCore import QMimeData, QPointF, Qt, QUrl
 from PySide6.QtGui import QDropEvent
-from PySide6.QtWidgets import QFileDialog
+from PySide6.QtWidgets import QFileDialog, QPushButton
 
 from app.db import summaries
 from app.models import Summary
@@ -135,6 +135,55 @@ def test_oversized_file_shows_inline_error_not_a_crash(db_conn, tmp_path, monkey
     assert len(sec.rows) == 0
     assert sec._error_label.isVisible() is True
     assert "huge.pdf" in sec._error_label.text()
+
+
+def test_open_button_calls_open_attachment_file(db_conn, tmp_path, monkeypatch):
+    summary = _make_summary(db_conn)
+    controller = EditorController(db_conn)
+    controller.load(summary.id)
+
+    source = tmp_path / "report.pdf"
+    source.write_bytes(b"a real small file")
+    controller.add_attachment(str(source))
+
+    sec = AttachmentsSection()
+    sec.bind_controller(controller)
+    sec.populate()
+    row = sec.rows[0]
+
+    called = {}
+    monkeypatch.setattr(
+        "app.ui.sections.attachments.open_attachment_file",
+        lambda stored_path: called.setdefault("stored_path", stored_path),
+    )
+    row.findChild(QPushButton).click()  # the row's "Open" button
+
+    assert called["stored_path"] == row.attachment.stored_path
+
+
+def test_open_button_shows_inline_error_when_file_missing(db_conn, tmp_path):
+    summary = _make_summary(db_conn)
+    controller = EditorController(db_conn)
+    controller.load(summary.id)
+
+    source = tmp_path / "report.pdf"
+    source.write_bytes(b"a real small file")
+    controller.add_attachment(str(source))
+
+    sec = AttachmentsSection()
+    sec.show()
+    sec._toggle()
+    sec.bind_controller(controller)
+    sec.populate()
+    row = sec.rows[0]
+
+    from app import config
+
+    (config.get_attachments_dir() / row.attachment.stored_path).unlink()
+    sec._on_open_row(row)
+
+    assert sec._error_label.isVisible() is True
+    assert "no longer on disk" in sec._error_label.text()
 
 
 def test_drop_event_imports_files(db_conn, tmp_path):

@@ -15,6 +15,7 @@ from app.models import Summary
 from app.ui.dialogs.advanced_search import (
     NAME_DEBOUNCE_MS,
     AdvancedSearchDialog,
+    COLUMN_WIDTH_PADDING,
     _ACTION_BUTTON_LABELS,
     _compute_column_widths,
 )
@@ -260,6 +261,24 @@ def test_view_panel_omits_blank_fields_and_shows_investigations_and_attribution(
     assert any(f"Created by {doc_a.name}" in t for t in texts), "doctor attribution shown — who created this record"
 
 
+def test_view_panel_shows_attachments(db_conn, qapp):
+    from app.db import attachments as attachments_db
+
+    first, _second, _doc_a, _doc_b = _seed_two(db_conn)
+    attachments_db.add(db_conn, first.id, "discharge-photo.jpg", "/fake/discharge-photo.jpg", 51200)
+    dialog = AdvancedSearchDialog(db_conn, _FakeMainWindow())
+    dialog.show()
+    qapp.processEvents()
+
+    row_index = next(r for r in range(dialog.table.rowCount()) if dialog.table.item(r, 0).data(Qt.UserRole) == first.id)
+    dialog.table.selectRow(row_index)
+    qapp.processEvents()
+
+    all_labels = dialog._view_scroll.body.findChildren(type(dialog._view_placeholder))
+    texts = [w.text() for w in all_labels]
+    assert any("discharge-photo.jpg" in t for t in texts)
+
+
 def test_view_panel_resets_to_placeholder_on_a_fresh_search(db_conn, qapp):
     first, _second, _doc_a, _doc_b = _seed_two(db_conn)
     dialog = AdvancedSearchDialog(db_conn, _FakeMainWindow())
@@ -330,10 +349,13 @@ def test_computed_column_widths_fit_the_real_actions_buttons(db_conn, qapp):
         metrics.horizontalAdvance(label) + 2 * (1 + theme.INPUT_PADDING_X) for label in _ACTION_BUTTON_LABELS
     )
     expected_actions_width += 2 * theme.SPACING_UNIT + 2 * 4
+    # QTableWidget::item's own QSS padding (app/theme.py) eats this much
+    # off every cell's usable width, including setCellWidget() cells —
+    # confirmed by direct measurement, see docs/decisions.md.
+    expected_actions_width += COLUMN_WIDTH_PADDING
 
     widths = _compute_column_widths(dialog.table)
     assert widths[7] == expected_actions_width
-    assert widths[7] >= expected_actions_width
 
 
 def test_no_horizontal_scrollbar_with_real_seeded_data(db_conn, qapp):
@@ -344,3 +366,67 @@ def test_no_horizontal_scrollbar_with_real_seeded_data(db_conn, qapp):
     qapp.processEvents()
 
     assert dialog.table.horizontalScrollBar().isVisible() is False
+
+
+def test_actions_column_actually_fits_the_rendered_buttons(db_conn, qapp):
+    # Regression test: setCellWidget() places a widget inside the cell's
+    # *content* rect, which QTableWidget::item's own QSS padding
+    # (app/theme.py) shrinks below the raw column width — a column sized
+    # to exactly fit the buttons' own sizeHint (ignoring that inset)
+    # clips "Full View" visibly. Assert against the real cell widget's
+    # actual on-screen size, not the column width number.
+    from PySide6.QtWidgets import QPushButton
+
+    first, _second, _doc_a, _doc_b = _seed_two(db_conn)
+    dialog = AdvancedSearchDialog(db_conn, _FakeMainWindow())
+    dialog.show()
+    qapp.processEvents()
+
+    row_index = next(r for r in range(dialog.table.rowCount()) if dialog.table.item(r, 0).data(Qt.UserRole) == first.id)
+    cell = dialog.table.cellWidget(row_index, 7)
+    buttons = cell.findChildren(QPushButton)
+    assert len(buttons) == 3
+    needed_width = sum(b.sizeHint().width() for b in buttons) + cell.layout().spacing() * 2
+    margins = cell.layout().contentsMargins()
+    needed_width += margins.left() + margins.right()
+    assert cell.width() >= needed_width, "Actions cell is narrower than its own buttons need — they'll clip"
+
+
+def test_patient_name_column_keeps_a_reasonable_width(db_conn, qapp):
+    # Regression test: a naive fix for the Actions-column clipping (widen
+    # every Fixed column) starved the Stretch column (Patient Name) down
+    # toward 0 once the Fixed columns' computed widths added up close to
+    # the available space — the single most important column disappearing
+    # is worse than the bug it was fixing.
+    _seed_two(db_conn)
+    dialog = AdvancedSearchDialog(db_conn, _FakeMainWindow())
+    dialog.show()
+    qapp.processEvents()
+
+    assert dialog.table.columnWidth(0) >= 140
+
+
+def test_view_panel_open_button_calls_open_attachment_file(db_conn, qapp, monkeypatch):
+    from app.db import attachments as attachments_db
+    from PySide6.QtWidgets import QPushButton
+
+    first, _second, _doc_a, _doc_b = _seed_two(db_conn)
+    attachments_db.add(db_conn, first.id, "discharge-photo.jpg", "1/discharge-photo.jpg", 51200)
+    dialog = AdvancedSearchDialog(db_conn, _FakeMainWindow())
+    dialog.show()
+    qapp.processEvents()
+
+    called = {}
+    monkeypatch.setattr(
+        "app.ui.widgets.summary_view.open_attachment_file",
+        lambda stored_path: called.setdefault("stored_path", stored_path),
+    )
+
+    row_index = next(r for r in range(dialog.table.rowCount()) if dialog.table.item(r, 0).data(Qt.UserRole) == first.id)
+    dialog.table.selectRow(row_index)
+    qapp.processEvents()
+
+    open_buttons = [b for b in dialog._view_scroll.body.findChildren(QPushButton) if b.text() == "Open"]
+    assert len(open_buttons) == 1
+    open_buttons[0].click()
+    assert called["stored_path"] == "1/discharge-photo.jpg"

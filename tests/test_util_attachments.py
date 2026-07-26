@@ -5,7 +5,15 @@ import pytest
 from PySide6.QtGui import QColor, QImage
 
 from app import config
-from app.util.attachments import AttachmentTooLargeError, MAX_IMAGE_DIMENSION, format_size, save_attachment_file
+from app.util.attachments import (
+    AttachmentMissingError,
+    AttachmentOpenUnsupportedError,
+    AttachmentTooLargeError,
+    MAX_IMAGE_DIMENSION,
+    format_size,
+    open_attachment_file,
+    save_attachment_file,
+)
 
 
 def _make_image(path, width, height):
@@ -85,6 +93,20 @@ def test_generated_stored_names_dont_collide(isolated_data_dir, tmp_path, qapp):
     dest_b = config.get_attachments_dir() / path_b
     assert dest_a.read_bytes() == b"first report"
     assert dest_b.read_bytes() == b"second report"
+
+
+def test_open_attachment_file_raises_clear_error_on_non_windows(isolated_data_dir, tmp_path, qapp):
+    source = tmp_path / "photo.png"
+    _make_image(source, 200, 150)
+    stored_relative_path, _size_bytes = save_attachment_file(source, summary_id=1)
+
+    with pytest.raises(AttachmentOpenUnsupportedError):
+        open_attachment_file(stored_relative_path)
+
+
+def test_open_attachment_file_raises_when_missing_from_disk(isolated_data_dir, qapp):
+    with pytest.raises(AttachmentMissingError):
+        open_attachment_file("1/does-not-exist.png")
 
 
 def test_format_size():

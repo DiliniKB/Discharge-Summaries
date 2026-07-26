@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from app import theme
+from app.db import attachments as attachments_db
 from app.db import doctors as doctors_db
 from app.db import summaries
 from app.printing import layout as print_layout
@@ -58,7 +59,20 @@ _COLUMNS = ["Patient Name", "BHT", "Ward", "Doctor", "Discharge Date", "Created"
 # header once) — computed instead, from real font metrics against the
 # actual content each column holds, so a font/DPI change on the target
 # laptop can't silently reintroduce the same clipping.
-COLUMN_WIDTH_PADDING = 24  # cell margin + a little breathing room, same for every computed column
+#
+# QTableWidget::item's own QSS rule (app/theme.py: "padding: 6px
+# {INPUT_PADDING_X}px") eats 2*INPUT_PADDING_X off every cell's usable
+# width before content ever gets drawn — confirmed by measurement, not
+# assumed: a cell widget set via setCellWidget() came out exactly
+# 2*INPUT_PADDING_X (+ a rounding pixel) narrower than the column width
+# that contained it. That's true for a text item eliding at the exact
+# same point too, not just widget cells. Every computed width below has
+# to add this back, plus a little genuine breathing room on top of it —
+# a first pass that only added breathing room (no inset) exactly fit the
+# sample text with zero slack and still clipped on real data.
+_CELL_CONTENT_INSET = 2 * theme.INPUT_PADDING_X
+_BREATHING_ROOM = 6
+COLUMN_WIDTH_PADDING = _CELL_CONTENT_INSET + _BREATHING_ROOM
 
 # BHT/Ward are plain digit strings (see docs/schema.md; test fixtures use
 # 5-digit BHTs like "10178", 2-digit wards like "45") — these samples are
@@ -91,6 +105,7 @@ def _compute_column_widths(table):
     actions_width = sum(cell_metrics.horizontalAdvance(label) + _ACTION_BUTTON_HORIZONTAL_CHROME for label in _ACTION_BUTTON_LABELS)
     actions_width += 2 * theme.SPACING_UNIT  # row_layout.setSpacing() between the three buttons
     actions_width += 2 * 4  # _build_actions_cell's own left/right QHBoxLayout margins
+    actions_width += COLUMN_WIDTH_PADDING  # same QTableWidget::item inset applies to setCellWidget() cells too
 
     return {
         1: _sized(_BHT_SAMPLE, "BHT"),
@@ -121,7 +136,7 @@ class AdvancedSearchDialog(QDialog):
         self._conn = conn
         self._main_window = main_window
         self.setWindowTitle("Advanced Search")
-        self.resize(1200, 700)
+        self.resize(1260, 700)
 
         self._doctors_by_id = {d.id: d for d in doctors_db.list_all(self._conn)}
 
@@ -151,7 +166,7 @@ class AdvancedSearchDialog(QDialog):
         # divided — QSplitter's initial layout still splits evenly (or
         # worse, gives the second widget most of the space) unless the
         # starting sizes are set explicitly.
-        splitter.setSizes([860, 280])
+        splitter.setSizes([1020, 200])
         root.addWidget(splitter, stretch=1)
 
         self._run_search()
@@ -304,6 +319,13 @@ class AdvancedSearchDialog(QDialog):
 
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Stretch)  # Patient Name absorbs remaining space
+        # QHeaderView.setMinimumSectionSize is deliberately NOT used here
+        # to floor Patient Name's width — it applies to every section, not
+        # just the Stretch one, so it would just inflate every Fixed
+        # column up to the same floor instead of protecting this one.
+        # Patient Name gets enough room by construction instead: the
+        # splitter/dialog sizing below (docs/decisions.md) leaves headroom
+        # beyond what the Fixed columns actually need.
         for col in range(1, len(_COLUMNS)):
             header.setSectionResizeMode(col, QHeaderView.Fixed)
         # Fixed widths for every non-stretching column — left to Qt's
@@ -419,9 +441,9 @@ class AdvancedSearchDialog(QDialog):
         if show_placeholder:
             self._view_scroll.add_widget(self._view_placeholder)
 
-    def _render_view_panel(self, summary, investigations):
+    def _render_view_panel(self, summary, investigations, attachments):
         self._clear_view_panel()
-        populate_summary_view(self._view_scroll, summary, investigations, self._doctors_by_id)
+        populate_summary_view(self._view_scroll, summary, investigations, self._doctors_by_id, attachments)
 
     # --- Row actions ----------------------------------------------------
 
@@ -439,12 +461,14 @@ class AdvancedSearchDialog(QDialog):
     def _on_view(self, summary_id):
         summary = summaries.get(self._conn, summary_id)
         investigations = summaries.list_investigations(self._conn, summary_id)
-        self._render_view_panel(summary, investigations)
+        attachments = attachments_db.list_for_summary(self._conn, summary_id)
+        self._render_view_panel(summary, investigations, attachments)
 
     def _on_full_view(self, summary_id):
         summary = summaries.get(self._conn, summary_id)
         investigations = summaries.list_investigations(self._conn, summary_id)
-        dialog = SummaryFullViewDialog(summary, investigations, self._doctors_by_id, self)
+        attachments = attachments_db.list_for_summary(self._conn, summary_id)
+        dialog = SummaryFullViewDialog(summary, investigations, self._doctors_by_id, attachments, self)
         dialog.exec()
 
     def _on_print(self, summary_id):
@@ -452,7 +476,11 @@ class AdvancedSearchDialog(QDialog):
         # editor's own Print button (docs/decisions.md) — not whichever
         # doctor created this particular row.
         doctor_id = self._main_window.selected_doctor.id
-        with tempfile.TemporaryDirectory() as tmp_dir:
+        # ignore_cleanup_errors: see app/ui/editor.py's _on_print — the
+        # external app Windows hands the "print" verb to can still hold
+        # the PDF open when this exits (WinError 32); best-effort cleanup,
+        # not a reason to interrupt the doctor closing the dialog.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
             dialog = PrintPreviewDialog(self._conn, summary_id, tmp_dir, doctor_id, self)
             dialog.exec()
 

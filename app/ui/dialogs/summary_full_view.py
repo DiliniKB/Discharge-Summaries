@@ -17,10 +17,11 @@ from app import theme
 from app.printing import layout as print_layout
 from app.ui.widgets.labeled import LabeledField
 from app.ui.widgets.scrollframe import ScrollFrame
+from app.ui.widgets.summary_view import _build_attachment_row
 
 
 class SummaryFullViewDialog(QDialog):
-    def __init__(self, summary, investigations, doctors_by_id, parent=None):
+    def __init__(self, summary, investigations, doctors_by_id, attachments=(), parent=None):
         super().__init__(parent)
         self.setWindowTitle(summary.patient_name or "Full View")
         self.resize(760, 820)
@@ -48,6 +49,8 @@ class SummaryFullViewDialog(QDialog):
         if history_card is not None:
             scroll.add_widget(history_card)
         scroll.add_widget(self._build_investigations_card(summary, investigations))
+        if attachments:
+            scroll.add_widget(self._build_attachments_card(attachments))
 
         close_button = QPushButton("Close")
         close_button.setObjectName("Secondary")
@@ -173,6 +176,17 @@ class SummaryFullViewDialog(QDialog):
                 any_field = True
         if not any_field:
             card_layout.addWidget(self._muted("No investigations or management recorded."))
+        return card
+
+    def _build_attachments_card(self, attachments):
+        # Only added to the page when there's at least one (see __init__),
+        # so no "no attachments" muted fallback line is needed here —
+        # unlike every other card, which is always present. Reuses
+        # summary_view.py's row (filename · size + Open button) rather
+        # than duplicating the open-file wiring a second time.
+        card, card_layout = self._section_card("ATTACHMENTS")
+        for attachment in attachments:
+            card_layout.addWidget(_build_attachment_row(attachment))
         return card
 
     # --- Small builders ------------------------------------------------

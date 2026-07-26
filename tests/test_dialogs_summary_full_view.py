@@ -117,3 +117,67 @@ def test_close_button_accepts(db_conn, qapp):
     assert len(close_buttons) == 1
     close_buttons[0].click()
     assert dialog.result() == QDialog.Accepted
+
+
+def test_attachments_card_shown_when_files_exist(db_conn, qapp):
+    from app.db import attachments as attachments_db
+
+    doctors_db.seed_if_empty(db_conn)
+    doctor = doctors_db.list_active(db_conn)[0]
+    created = summaries.create(db_conn, Summary(patient_name="Has Files", bht_number="1", created_by=doctor.id))
+    attachments_db.add(db_conn, created.id, "xray.jpg", "/fake/path/xray.jpg", 204800)
+    investigations = summaries.list_investigations(db_conn, created.id)
+    doctors_by_id = {d.id: d for d in doctors_db.list_all(db_conn)}
+    attachments = attachments_db.list_for_summary(db_conn, created.id)
+
+    dialog = SummaryFullViewDialog(created, investigations, doctors_by_id, attachments)
+    dialog.show()
+    qapp.processEvents()
+
+    headers = [w.text() for w in dialog.findChildren(QLabel) if w.objectName() == "SectionHeader"]
+    assert "ATTACHMENTS" in headers
+    body_text = " ".join(w.text() for w in dialog.findChildren(QLabel))
+    assert "xray.jpg" in body_text
+    assert "200 KB" in body_text
+
+
+def test_attachments_card_omitted_when_none(db_conn, qapp):
+    doctors_db.seed_if_empty(db_conn)
+    doctor = doctors_db.list_active(db_conn)[0]
+    created = summaries.create(db_conn, Summary(patient_name="No Files", bht_number="2", created_by=doctor.id))
+    investigations = summaries.list_investigations(db_conn, created.id)
+    doctors_by_id = {d.id: d for d in doctors_db.list_all(db_conn)}
+
+    dialog = SummaryFullViewDialog(created, investigations, doctors_by_id, attachments=())
+    dialog.show()
+    qapp.processEvents()
+
+    headers = [w.text() for w in dialog.findChildren(QLabel) if w.objectName() == "SectionHeader"]
+    assert "ATTACHMENTS" not in headers
+
+
+def test_attachments_card_open_button_calls_open_attachment_file(db_conn, qapp, monkeypatch):
+    from app.db import attachments as attachments_db
+
+    doctors_db.seed_if_empty(db_conn)
+    doctor = doctors_db.list_active(db_conn)[0]
+    created = summaries.create(db_conn, Summary(patient_name="Has Files", bht_number="1", created_by=doctor.id))
+    attachments_db.add(db_conn, created.id, "xray.jpg", "1/xray.jpg", 204800)
+    investigations = summaries.list_investigations(db_conn, created.id)
+    doctors_by_id = {d.id: d for d in doctors_db.list_all(db_conn)}
+    attachments = attachments_db.list_for_summary(db_conn, created.id)
+
+    called = {}
+    monkeypatch.setattr(
+        "app.ui.widgets.summary_view.open_attachment_file",
+        lambda stored_path: called.setdefault("stored_path", stored_path),
+    )
+
+    dialog = SummaryFullViewDialog(created, investigations, doctors_by_id, attachments)
+    dialog.show()
+    qapp.processEvents()
+
+    open_buttons = [b for b in dialog.findChildren(QPushButton) if b.text() == "Open"]
+    assert len(open_buttons) == 1
+    open_buttons[0].click()
+    assert called["stored_path"] == "1/xray.jpg"

@@ -12,18 +12,25 @@ from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QPushBut
 
 from app import theme
 from app.ui.widgets.collapsible import CollapsibleSection
-from app.util.attachments import AttachmentTooLargeError, format_size
+from app.util.attachments import (
+    AttachmentMissingError,
+    AttachmentOpenUnsupportedError,
+    AttachmentTooLargeError,
+    format_size,
+    open_attachment_file,
+)
 
 
 class _AttachmentRow(QWidget):
-    """One attached file: name, size, remove button. Mirrors
-    investigations.py's _AdHocRow — constructor-injected on_remove
-    callback passing itself, so the parent doesn't track index/id mapping."""
+    """One attached file: name, size, open button, remove button. Mirrors
+    investigations.py's _AdHocRow — constructor-injected on_remove/on_open
+    callbacks passing itself, so the parent doesn't track index/id mapping."""
 
-    def __init__(self, attachment, on_remove, parent=None):
+    def __init__(self, attachment, on_remove, on_open, parent=None):
         super().__init__(parent)
         self.attachment = attachment
         self._on_remove = on_remove
+        self._on_open = on_open
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -35,6 +42,11 @@ class _AttachmentRow(QWidget):
         size_label = QLabel(format_size(attachment.size_bytes))
         size_label.setObjectName("Muted")
         layout.addWidget(size_label)
+
+        open_button = QPushButton("Open")
+        open_button.setObjectName("SecondaryCompact")
+        open_button.clicked.connect(lambda: self._on_open(self))
+        layout.addWidget(open_button)
 
         remove_button = QToolButton()
         remove_button.setText("✕")
@@ -105,7 +117,7 @@ class AttachmentsSection(CollapsibleSection):
         self.setAcceptDrops(enabled)
 
     def _add_row_widget(self, attachment):
-        row = _AttachmentRow(attachment, on_remove=self._on_remove_row)
+        row = _AttachmentRow(attachment, on_remove=self._on_remove_row, on_open=self._on_open_row)
         self.rows_layout.addWidget(row)
         self.rows.append(row)
 
@@ -151,6 +163,18 @@ class AttachmentsSection(CollapsibleSection):
     def _on_remove_row(self, row):
         self._controller.remove_attachment(row.attachment.id)
         self.populate()
+
+    def _on_open_row(self, row):
+        # Hands off to the OS's default viewer for the file type (photo,
+        # PDF, DOCX) — no in-app preview to build. Informs, never blocks:
+        # a missing file or a non-Windows dev run shows an inline message
+        # instead of crashing (docs/decisions.md's "warn, don't block").
+        self._error_label.setVisible(False)
+        try:
+            open_attachment_file(row.attachment.stored_path)
+        except (AttachmentMissingError, AttachmentOpenUnsupportedError) as e:
+            self._error_label.setText(str(e))
+            self._error_label.setVisible(True)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
