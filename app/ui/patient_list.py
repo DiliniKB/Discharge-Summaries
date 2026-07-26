@@ -1,7 +1,12 @@
-"""Left pane: New Card button, search, patient cards. See docs/ui-spec.md §3.2.
+"""Left pane: New Card button, Advanced Search button, patient cards.
+See docs/ui-spec.md §3.2.
 
-Backed by the real DB (app/db/summaries.py) — list_page()/search() never
-load full records, per CLAUDE.md hard rule #4.
+Backed by the real DB (app/db/summaries.py) — list_page() never loads
+full records, per CLAUDE.md hard rule #4.
+
+The old inline search box was replaced entirely by the Advanced Search
+dialog (app/ui/dialogs/advanced_search.py, docs/decisions.md) — this pane
+is now just the default discharge-date-ordered browsing list.
 
 Deferred: the "dot marker" on unsaved cards (ui-spec.md §3.2) isn't drawn
 yet — undischarged cards do correctly sort to the top (see summaries.py's
@@ -9,11 +14,10 @@ _ORDER_UNDISCHARGED_FIRST), just without the visual marker distinguishing
 them further.
 """
 
-from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QLabel,
-    QLineEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -22,8 +26,6 @@ from PySide6.QtWidgets import (
 from app import theme
 from app.db import summaries
 from app.ui.widgets.scrollframe import ScrollFrame
-
-SEARCH_DEBOUNCE_MS = 150
 
 
 def _display_date(iso_date):
@@ -88,20 +90,15 @@ class PatientList(QWidget):
         self.new_card_button.setMinimumHeight(theme.INPUT_HEIGHT_PX)
         layout.addWidget(self.new_card_button)
 
-        self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("Search...")
-        self.search_box.setMinimumHeight(theme.INPUT_HEIGHT_PX)
-        layout.addWidget(self.search_box)
+        self.advanced_search_button = QPushButton("Advanced Search")
+        self.advanced_search_button.setObjectName("Secondary")
+        self.advanced_search_button.setMinimumHeight(theme.INPUT_HEIGHT_PX)
+        layout.addWidget(self.advanced_search_button)
 
         self._scroll = ScrollFrame()
         layout.addWidget(self._scroll, stretch=1)
 
-        self._debounce = QTimer(self)
-        self._debounce.setSingleShot(True)
-        self._debounce.timeout.connect(self.refresh)
-        self.search_box.textChanged.connect(lambda _: self._debounce.start(SEARCH_DEBOUNCE_MS))
-
-        self._no_results_label = QLabel()
+        self._no_results_label = QLabel("No summaries yet — click + New Card to create one.")
         self._no_results_label.setObjectName("Muted")
         self._no_results_label.setVisible(False)
         self._scroll.add_widget(self._no_results_label)
@@ -112,12 +109,7 @@ class PatientList(QWidget):
     def refresh(self):
         """Re-queries the DB and rebuilds the card list, preserving
         whichever summary is currently selected (if it's still present)."""
-        query = self.search_box.text().strip()
-        if query:
-            patients = summaries.search(self._conn, query)
-            self._no_results_label.setText(f'No summaries match "{query}"')
-        else:
-            patients = summaries.list_page(self._conn)
+        patients = summaries.list_page(self._conn)
         self._render(patients)
 
     def select(self, summary_id):

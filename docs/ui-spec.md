@@ -25,9 +25,10 @@ These follow from the machine and the setting, not from taste.
 ## 2. Screen inventory
 
 1. **Main window** — patient list + editor (the primary and near-only screen)
-2. **Print preview** — modal, shows the A4 card at true proportions
-3. **Template manager** — modal, edit canned procedure text
-4. **Settings** — modal, printer default, backup path, doctor list
+2. **Advanced Search** — modal, filter/sort/browse every summary, view/print/edit any result
+3. **Print preview** — modal, shows the A4 card at true proportions
+4. **Template manager** — modal, edit canned procedure text
+5. **Settings** — modal, printer default, backup path, doctor list
 
 ---
 
@@ -41,7 +42,8 @@ These follow from the machine and the setting, not from taste.
 ├──────────────┬─────────────────────────────────────────────────────────┤
 │ [+ New Card] │  W.D. Kusuma Wijerathna          [Print] [Save] [ ⋮ ]   │ 64px
 │              │  BHT 10178 · Ward 45                    ✓ Saved 14:32   │
-│ [Search... ] ├─────────────────────────────────────────────────────────┤
+│ [Advanced    │                                                          │
+│  Search    ] ├─────────────────────────────────────────────────────────┤
 │              │                                                          │
 │ ▸ Wijerathna │   ▼ PATIENT & ADMISSION                                 │
 │   10178 · 45 │   ┌────────────────────────────────────────────────┐    │
@@ -85,11 +87,21 @@ These follow from the machine and the setting, not from taste.
 ### 3.2 Patient list pane (280 px, fixed)
 
 - **New Card** — full-width primary button, top. Creates a blank record and focuses the Name field.
-- **Search** — filters as you type, matching BHT number *or* name substring, case-insensitive. Debounce 150 ms.
+- **Advanced Search** — full-width secondary button, below New Card. Opens the Advanced Search modal (§3.2a) — this pane has no search box of its own anymore.
 - **Cards** — name (bold, 15 px), then `BHT · Ward` and discharge date (13 px, grey). Discharge date matters because re-admissions produce duplicate names.
-- Sorted by discharge date descending. Unsaved new cards pin to the top with a dot marker.
+- Sorted by discharge date descending — always the default browsing list, unfiltered. Unsaved new cards pin to the top with a dot marker.
 - Selected card: 3 px left accent bar, tinted background.
 - Scrolls independently of the editor.
+
+### 3.2a Advanced Search (modal, 1200×700)
+
+Replaces the old inline search box entirely — this is the only way to filter or search summaries now (docs/decisions.md).
+
+- **Filters**, grouped by kind (all optional, combine with AND), three rows: (1) Patient Name/BHT, Doctor (*All doctors* + every doctor including deactivated ones), and the **Search**/**Clear filters** buttons — together on this top row since it's the widest, rather than stranded on their own line; (2) Keyword, full width (matches clinical text — procedure, indication, steps, presenting complaint, past medical/surgical history, allergies, examination, management, histology; **not** name/BHT, which have their own field); (3) Created date range and Modified date range together, compact, left-aligned. No debounce — Search is a deliberate action, not live-as-you-type.
+- **Results table**: Patient Name / BHT / Ward / Doctor / Discharge Date / Created / Modified / Actions. Click a column header to sort.
+- **Clicking a row** shows its full record in the view panel directly — no separate View button; a click is enough for something non-destructive and reversible.
+- **Actions** column, per row: **Print** (opens the same Print Preview modal as the editor's Print button), **Edit** (loads the record into the main editor and closes this dialog) — kept as explicit buttons since both are real, consequential operations, unlike just looking.
+- **View panel** — alongside the results table. Leads with an identity line (name, age/sex, BHT, ward) and doctor attribution (created/last edited by, with timestamps), then Admission / Procedure / Clinical History / Investigations & Management, grouped the same way as the editor's sections. Blank fields are omitted entirely rather than shown as "—" — same "omit if nothing to show" rule the printed card already follows (`docs/print-layout.md`). Investigation values are shown inline (`FBS 86 · SCr 40 · ...`) — previously missing from this panel entirely. Not a PDF — instant, no render cost per click (docs/decisions.md).
 
 ### 3.3 Editor pane
 
@@ -214,13 +226,13 @@ Segoe UI (present on every Windows 10 install; no font shipping needed).
 | Field blur | Autosave. Indicator shows `Saving…` then `✓ Saved HH:MM`. |
 | `Ctrl+S` | Force save. |
 | `Ctrl+N` | New card. |
-| `Ctrl+F` | Focus search. |
+| `Ctrl+F` | Open Advanced Search. |
 | `Ctrl+P` | Print preview. |
-| `Esc` | Close modal; if none, clear search. |
+| `Esc` | Close modal (native Qt `QDialog` behaviour). |
 | `Tab` | Next field in paper-form order, skipping collapsed sections. |
 | Switch patient with unsaved edits | Save silently. No dialog — autosave means there is nothing to ask about. |
 | Delete | Confirm by typing the patient name. Soft-delete: flag the row, purge after 30 days. |
-| Search returns nothing | `No summaries match "xyz"` plus a **Create new card** button. |
+| Advanced Search returns nothing | Empty results table — filters are visible above it, inviting adjustment rather than a dead end. |
 | Empty database | Centred message with a single New Card call to action. |
 
 ---

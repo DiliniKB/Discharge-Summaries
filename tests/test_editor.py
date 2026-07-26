@@ -82,22 +82,6 @@ def test_new_card_creates_a_real_row_loads_and_selects_it(isolated_data_dir):
     win.close()
 
 
-def test_closing_right_after_typing_in_search_doesnt_crash_on_a_stray_timer(isolated_data_dir):
-    """Regression test: typing into search arms a 150ms debounce QTimer.
-    Closing the app immediately after (before that timer fires) must not
-    let it later call refresh() against the connection closeEvent() just
-    closed. Found via this exact bug appearing in the test suite itself —
-    see MainWindow.closeEvent()."""
-    _seed_two(isolated_data_dir)
-    win = MainWindow()
-    win.show()
-
-    win.patient_list.search_box.setText("silva")  # arms the debounce timer, deliberately not awaited
-    win.close()  # must stop that timer as part of closing, not just flush+close the DB
-
-    assert win.patient_list._debounce.isActive() is False
-
-
 def test_overflow_menu_shells_dont_raise(isolated_data_dir):
     _seed_two(isolated_data_dir)
     win = MainWindow()

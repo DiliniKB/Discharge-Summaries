@@ -297,6 +297,35 @@ def build_stylesheet():
         border-left: 3px solid {PRIMARY};
     }}
 
+    QTableWidget {{
+        background: {SURFACE};
+        border: 1px solid {BORDER};
+        border-radius: {CORNER_RADIUS}px;
+        gridline-color: {BORDER};
+        selection-background-color: {PRIMARY_TINT};
+        selection-color: {TEXT};
+    }}
+    QTableWidget::item {{
+        padding: 6px {INPUT_PADDING_X}px;
+        border: none;
+    }}
+    QTableWidget::item:alternate {{
+        background: {BG};
+    }}
+    QHeaderView::section {{
+        background: {SURFACE};
+        color: {TEXT_MUTED};
+        font-size: {SIZE_METADATA}px;
+        font-weight: 600;
+        padding: 8px {INPUT_PADDING_X}px;
+        border: none;
+        border-bottom: 1px solid {BORDER};
+        border-right: 1px solid {BORDER};
+    }}
+    QHeaderView::section:last {{
+        border-right: none;
+    }}
+
     QScrollArea {{
         border: none;
     }}

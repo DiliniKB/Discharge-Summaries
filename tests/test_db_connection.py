@@ -24,10 +24,16 @@ def test_pragmas_and_schema(db_conn):
     assert expected_tables.issubset(tables)
 
     version_row = conn.execute("SELECT value FROM app_meta WHERE key = 'schema_version'").fetchone()
-    assert version_row is not None and version_row["value"] == "1"
+    assert version_row is not None and version_row["value"] == "2"
 
     indexes = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
-    expected_indexes = {"idx_summaries_bht", "idx_summaries_name", "idx_summaries_discharge"}
+    expected_indexes = {
+        "idx_summaries_bht",
+        "idx_summaries_name",
+        "idx_summaries_discharge",
+        "idx_summaries_created_by",
+        "idx_summaries_last_edited_by",
+    }
     assert expected_indexes.issubset(indexes)
 
 
@@ -61,5 +67,5 @@ def test_reconnecting_does_not_reapply_migration(isolated_data_dir):
     conn2 = connection.connect()
     assert conn2 is not None
     version_row2 = conn2.execute("SELECT value FROM app_meta WHERE key = 'schema_version'").fetchone()
-    assert version_row2["value"] == "1"
+    assert version_row2["value"] == "2"
     connection.close(conn2)

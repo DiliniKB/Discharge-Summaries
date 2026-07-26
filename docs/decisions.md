@@ -182,6 +182,30 @@ With a few hundred summaries, loading everything would work fine today and degra
 
 ---
 
+## Advanced Search replaces the inline search box entirely
+
+**Decision:** the patient list pane's old debounced search box is gone. Finding a record now goes through a dedicated Advanced Search modal (`app/ui/dialogs/advanced_search.py`) with combinable filters — Patient Name/BHT, Doctor, Keyword, Created date range, Modified date range — a sortable results table, and per-row View/Print/Edit actions plus a read-only view panel.
+
+**Why replace rather than add alongside.** The requested filter set (doctor, date ranges, keyword) doesn't fit in a 280px-wide sidebar alongside New Card and the card list — it needs real width for a table and a view panel. Rather than a second, parallel search surface, one clear entry point (the Advanced Search button, also `Ctrl+F`) avoids the user having to remember which box does what. The left pane keeps its plain, unfiltered, discharge-date-ordered browsing list for the common case of "what's here right now."
+
+**Patient Name/BHT is one field, not two.** The old search matched name or BHT together; folding both into one filter field keeps that lookup working (BHT is the ward's primary identifier) without adding a field beyond what was actually requested.
+
+**Doctor filter checks `created_by` OR `last_edited_by`.** A doctor searching for "their" cases wants ones they started as well as ones they most recently touched — checking only one field would hide half of what they're looking for.
+
+**Keyword searches broad clinical text, not name/BHT.** Patient Name/BHT already has its own field; keyword instead covers procedure_title, indication, procedure_steps, presenting_complaint, past_medical_history, past_surgical_history, allergies, examination, findings, management, and histology_report — "find the summary that mentioned X."
+
+**Date ranges accept an unindexed scan.** `date(created_at) BETWEEN ? AND ?` can't use a plain index (the function wrapper prevents it). Accepted because Advanced Search is an explicit, infrequent action (a button click) rather than the per-keystroke list-pane path CLAUDE.md's I/O rules are really aimed at. The doctor filter's `created_by`/`last_edited_by` columns *do* get a new index (migration `002_doctor_indexes.sql`) since that's a plain equality/OR comparison an index actually helps.
+
+**View panel is a built-from-scratch read-only layout, not a re-rendered PDF.** `PrintPreviewDialog` already renders the real PDF and could technically be embedded per-row, but that means writing a temp file and invoking ReportLab on every single row selection — slow, and wasteful for what's meant to be a quick glance before deciding whether to Print or Edit. A plain read-only field layout, grouped the same way as the editor's own sections, is instant.
+
+**Selecting a row shows the record — no separate View button.** Looking at a record is non-destructive and instant (the view panel is a plain read-only layout, not a render), so making the user click an extra button first added a step without protecting against anything. Print and Edit stayed as explicit buttons: both are real, consequential actions — Print produces a physical page, Edit switches what the main window has open — so they deserve a deliberate click rather than firing on selection.
+
+**View panel leads with identity, hides blanks, and shows investigation values.** First pass just dumped every field in a flat list, including blank ones shown as "—" — accurate but not how a doctor actually scans a record. Reworked to: an identity line up top (name, age/sex, BHT, ward) so "is this the right patient?" is answered in one glance, not by reading a field labelled "Patient Name" partway down a list; doctor attribution (created/last edited by, with timestamps) since this dialog exists specifically to search across doctors; blank fields omitted entirely rather than shown as empty, reusing the same "omit if nothing to show" rule `app/printing/layout.py` already applies to the printed card (`has_clinical_history`, `format_investigations`, `DETAIL_FIELDS`/`CLINICAL_HISTORY_FIELDS`/`TAIL_FIELDS`) rather than re-deriving it; and investigation values shown inline, which the first pass omitted entirely — a real gap, since lab results are exactly what a doctor scanning a record wants to see.
+
+**Filter rows all use the same layout pattern; Search/Clear attach to the top row.** An earlier pass fixed cramped date-field spacing but left the panel feeling disorganized: the identity and keyword rows stretched edge-to-edge while the date row stayed half-width, and Search/Clear sat stranded on their own line below a mostly-empty row. Every row now uses the same `QHBoxLayout` + trailing `addStretch()` pattern for consistency, and the buttons moved onto the top (widest) row instead of floating below — a small `_button_row_aligned_with_inputs()` helper gives them a blank spacer label matching `LabeledField`'s own label-then-input structure, so they sit level with the inputs beside them rather than floating higher.
+
+---
+
 ## Open items
 
 | Item | Blocks |

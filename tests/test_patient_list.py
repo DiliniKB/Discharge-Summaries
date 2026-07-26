@@ -1,4 +1,6 @@
-"""PatientList: real DB-backed list, sorting, selection, search."""
+"""PatientList: real DB-backed browsing list + selection. Searching lives
+entirely in the Advanced Search dialog now (docs/decisions.md) — see
+tests/test_advanced_search_dialog.py."""
 
 from app.db import summaries
 from app.models import Summary
@@ -48,32 +50,24 @@ def test_card_selection_is_exclusive(db_conn):
     assert isinstance(other.patient["id"], int), "card click carries a real summary_id, not a fixture dict"
 
 
-def test_search_filters_by_name_or_bht(db_conn):
-    _seed(db_conn)
+def test_advanced_search_button_opens_the_dialog_instead_of_an_inline_search_box(db_conn):
     pl = PatientList(db_conn)
     pl.show()
 
-    # setText() arms the 150ms debounce QTimer via textChanged. Bypassing it
-    # with an immediate refresh() for a deterministic test — but the armed
-    # timer must be stopped too, or it fires for real later (possibly during
-    # a LATER test, once db_conn's teardown has already closed this
-    # connection — a real bug this exact pattern caught).
-    pl.search_box.setText("silva")
-    pl._debounce.stop()
-    pl.refresh()
-    assert len(pl._cards) == 1
-    assert pl._cards[0].patient["bht_number"] == "10166"
+    assert not hasattr(pl, "search_box"), "inline search was replaced entirely — no search box left"
+    assert pl.advanced_search_button.text() == "Advanced Search"
 
-    pl.search_box.setText("zzz-no-match")
-    pl._debounce.stop()
-    pl.refresh()
+
+def test_no_summaries_yet_empty_state(db_conn):
+    pl = PatientList(db_conn)
+    pl.show()
+
     assert len(pl._cards) == 0
     assert pl._no_results_label.isVisible() is True
 
-    pl.search_box.setText("")
-    pl._debounce.stop()
+    summaries.create(db_conn, Summary(patient_name="A.B. Perera", bht_number="10202"))
     pl.refresh()
-    assert len(pl._cards) == 5
+    assert pl._no_results_label.isVisible() is False
 
 
 def test_undischarged_card_pins_to_the_top(db_conn):

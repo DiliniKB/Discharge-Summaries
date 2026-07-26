@@ -8,8 +8,8 @@ triggers a write. Never call update() with a full record; that defeats
 the whole point of diffing first.
 
 CLAUDE.md hard rule: never SELECT * the summaries table into memory. The
-list pane uses list_page()/search(), which only ever select the five
-columns the list actually displays.
+list pane uses list_page(); Advanced Search uses advanced_search(). Both
+only ever select the columns their respective views actually display.
 """
 
 import dataclasses
@@ -60,14 +60,79 @@ def list_page(conn, limit=50, offset=0):
     return [dict(r) for r in rows]
 
 
-def search(conn, query, limit=50):
-    like = f"%{query}%"
+# Broad clinical-text columns for the Advanced Search keyword filter — NOT
+# patient_name/bht_number, which have their own dedicated "Patient Name /
+# BHT" filter field in that dialog (docs/decisions.md).
+_KEYWORD_COLUMNS = [
+    "procedure_title",
+    "indication",
+    "procedure_steps",
+    "presenting_complaint",
+    "past_medical_history",
+    "past_surgical_history",
+    "allergies",
+    "examination",
+    "findings",
+    "management",
+    "histology_report",
+]
+
+
+def advanced_search(
+    conn,
+    patient_name="",
+    keyword="",
+    doctor_id=None,
+    created_from=None,
+    created_to=None,
+    modified_from=None,
+    modified_to=None,
+    limit=200,
+):
+    """Backs the Advanced Search dialog — a deliberate, explicit action
+    (button click), not the hot per-keystroke list-pane path, so an
+    unindexed date(...) scan on created_at/updated_at is an accepted
+    tradeoff here (docs/decisions.md). Still respects CLAUDE.md's "never
+    SELECT * the summaries table into memory" — only the columns the
+    results table displays are selected; the full record loads only when
+    a row is actually viewed/edited, via get()."""
+    where = ["deleted_at IS NULL"]
+    params = []
+
+    if patient_name:
+        # Matches BHT too — the old quick search covered both, and BHT is
+        # the ward's primary identifier; folding it into one field keeps
+        # that lookup working without adding a field the user didn't ask
+        # for (docs/decisions.md).
+        like = f"%{patient_name}%"
+        where.append("(patient_name LIKE ? OR bht_number LIKE ?)")
+        params += [like, like]
+
+    if keyword:
+        like = f"%{keyword}%"
+        keyword_clause = " OR ".join(f"{col} LIKE ?" for col in _KEYWORD_COLUMNS)
+        where.append(f"({keyword_clause})")
+        params.extend([like] * len(_KEYWORD_COLUMNS))
+
+    if doctor_id is not None:
+        where.append("(created_by = ? OR last_edited_by = ?)")
+        params += [doctor_id, doctor_id]
+
+    if created_from or created_to:
+        where.append("date(created_at) BETWEEN ? AND ?")
+        params += [created_from or "0000-01-01", created_to or "9999-12-31"]
+
+    if modified_from or modified_to:
+        where.append("date(updated_at) BETWEEN ? AND ?")
+        params += [modified_from or "0000-01-01", modified_to or "9999-12-31"]
+
+    where_sql = " AND ".join(where)
     rows = conn.execute(
-        f"SELECT id, patient_name, bht_number, ward, date_discharge "
-        f"FROM summaries WHERE deleted_at IS NULL "
-        f"AND (patient_name LIKE ? OR bht_number LIKE ?) "
+        f"SELECT id, patient_name, bht_number, ward, date_discharge, "
+        f"created_at, updated_at, created_by, last_edited_by "
+        f"FROM summaries WHERE {where_sql} "
         f"{_ORDER_UNDISCHARGED_FIRST} LIMIT ?",
-        (like, like, limit),
+        (*params, limit),
     ).fetchall()
     return [dict(r) for r in rows]
 

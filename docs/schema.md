@@ -68,9 +68,11 @@ Indexes:
 CREATE INDEX idx_summaries_bht      ON summaries(bht_number);
 CREATE INDEX idx_summaries_name     ON summaries(patient_name);
 CREATE INDEX idx_summaries_discharge ON summaries(date_discharge DESC);
+CREATE INDEX idx_summaries_created_by ON summaries(created_by);
+CREATE INDEX idx_summaries_last_edited_by ON summaries(last_edited_by);
 ```
 
-The first two back the search box. The third backs the default list ordering. On a spinning disk these matter more than they would on an SSD.
+The first two back the Advanced Search patient-name filter. The third backs the default list ordering. The last two (migration `002_doctor_indexes.sql`) back Advanced Search's doctor filter, which checks `created_by OR last_edited_by`. On a spinning disk these matter more than they would on an SSD.
 
 ---
 
@@ -169,16 +171,22 @@ ORDER BY date_discharge DESC, id DESC
 LIMIT 50 OFFSET ?;
 ```
 
-**Search** — debounced 150ms in the UI, hits both indexes:
+**Advanced Search** — explicit action (button click, not per-keystroke), filters combine with AND:
 
 ```sql
-SELECT id, patient_name, bht_number, ward, date_discharge
+SELECT id, patient_name, bht_number, ward, date_discharge,
+       created_at, updated_at, created_by, last_edited_by
 FROM summaries
 WHERE deleted_at IS NULL
-  AND (patient_name LIKE ? OR bht_number LIKE ?)
+  AND (patient_name LIKE ? OR bht_number LIKE ?)      -- Patient Name / BHT filter
+  AND (created_by = ? OR last_edited_by = ?)          -- Doctor filter
+  AND date(created_at) BETWEEN ? AND ?                -- Created range
+  AND date(updated_at) BETWEEN ? AND ?                -- Modified range
 ORDER BY date_discharge DESC
-LIMIT 50;
+LIMIT 200;
 ```
+
+Each clause is only added when that filter is actually set. The keyword filter (matching broad clinical text, not shown above) adds its own `OR`-joined `LIKE` block across `procedure_title`, `indication`, `procedure_steps`, and the rest of the free-text fields.
 
 **Full record** — only on selection, one summary at a time.
 

@@ -24,6 +24,7 @@ from app import config, theme
 from app.db import app_meta, connection as db_connection
 from app.db import doctors as doctors_db
 from app.db import templates as templates_db
+from app.ui.dialogs.advanced_search import AdvancedSearchDialog
 from app.ui.dialogs.doctors import DoctorsDialog
 from app.ui.dialogs.settings import BACKUP_PATH_KEY, SettingsDialog
 from app.ui.dialogs.templates import TemplatesDialog
@@ -78,6 +79,7 @@ class MainWindow(QMainWindow):
 
         self.patient_list.patient_selected.connect(self.editor.load_summary)
         self.patient_list.new_card_button.clicked.connect(self._on_new_card)
+        self.patient_list.advanced_search_button.clicked.connect(self._open_advanced_search)
         # A save can change what a card should display (name/BHT typed
         # into a previously-blank new card) — refresh the list so it
         # stays truthful, not just the open editor.
@@ -89,6 +91,10 @@ class MainWindow(QMainWindow):
         dialog = TemplatesDialog(self._conn, self)
         dialog.exec()
         self.editor.procedure_section.set_templates(templates_db.list_active(self._conn))
+
+    def _open_advanced_search(self):
+        dialog = AdvancedSearchDialog(self._conn, self, self)
+        dialog.exec()
 
     def _on_new_card(self):
         """+ New Card — creates a real blank row immediately (ui-spec.md
@@ -104,11 +110,9 @@ class MainWindow(QMainWindow):
         # the buttons themselves already enforce via _set_has_open_summary.
         QShortcut(QKeySequence("Ctrl+N"), self, activated=self.patient_list.new_card_button.click)
 
-        def focus_search():
-            self.patient_list.search_box.setFocus()
-            self.patient_list.search_box.selectAll()
-
-        QShortcut(QKeySequence("Ctrl+F"), self, activated=focus_search)
+        # "Find" — opens Advanced Search, which replaced the old inline
+        # search box entirely (docs/decisions.md).
+        QShortcut(QKeySequence("Ctrl+F"), self, activated=self.patient_list.advanced_search_button.click)
 
         def trigger_print():
             if self.editor.print_button.isEnabled():
@@ -122,10 +126,9 @@ class MainWindow(QMainWindow):
 
         QShortcut(QKeySequence("Ctrl+S"), self, activated=trigger_save)
 
-        # No modals exist yet (print preview, dialogs) — Esc's "close modal"
-        # half will be added when one does. Its fallback ("clear search")
-        # works today.
-        QShortcut(QKeySequence("Esc"), self, activated=self.patient_list.search_box.clear)
+        # Esc closes modals natively via Qt (QDialog) — no explicit
+        # shortcut needed for that half. There's no search box to clear
+        # anymore, so no fallback action is wired here.
 
     def _build_header(self):
         header = QFrame()
@@ -178,14 +181,6 @@ class MainWindow(QMainWindow):
         # Never lose a pending edit on exit, and never leave the connection
         # open — CLAUDE.md: "closed at exit."
         self._controller.flush()
-
-        # PatientList's search debounce is a real QTimer — if a user types
-        # into search and closes the app within that ~150ms window, the
-        # timer would otherwise fire after the connection below is closed,
-        # calling refresh() on a dead connection. Found via a test-suite
-        # bug (a leftover armed timer firing against an already-closed
-        # connection in a later test), same underlying risk applies here.
-        self.patient_list._debounce.stop()
 
         backup_path = app_meta.get(self._conn, BACKUP_PATH_KEY)
         if backup_path:

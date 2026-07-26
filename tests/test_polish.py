@@ -89,8 +89,13 @@ def test_ctrl_n_opens_a_real_summary_then_ctrl_p_and_ctrl_s_fire(isolated_data_d
     win.close()
 
 
-def test_ctrl_f_focuses_search_and_esc_clears_it(isolated_data_dir, qapp):
+def test_ctrl_f_opens_advanced_search(isolated_data_dir, qapp, monkeypatch):
+    from app.ui.dialogs.advanced_search import AdvancedSearchDialog
     from app.ui.main_window import MainWindow
+
+    # Real .exec() blocks — mocked to just show(), same technique used for
+    # every other modal dialog test (see test_dialogs.py).
+    monkeypatch.setattr(AdvancedSearchDialog, "exec", lambda self: self.show())
 
     win = MainWindow()
     win.show()
@@ -98,17 +103,10 @@ def test_ctrl_f_focuses_search_and_esc_clears_it(isolated_data_dir, qapp):
     win.activateWindow()
     QTest.qWaitForWindowActive(win)
     qapp.processEvents()
-    win.editor.setFocus()  # move focus away first, so Ctrl+F moving it is provable
-    qapp.processEvents()
 
     QTest.keySequence(win, QKeySequence("Ctrl+F"))
     qapp.processEvents()
-    assert qapp.focusWidget() is win.patient_list.search_box
-
-    win.patient_list.search_box.setText("silva")
-    QTest.keySequence(win, QKeySequence(Qt.Key_Escape))
-    qapp.processEvents()
-    assert win.patient_list.search_box.text() == ""
+    assert any(isinstance(w, AdvancedSearchDialog) and w.isVisible() for w in qapp.topLevelWidgets())
 
     win.close()
 
