@@ -38,6 +38,9 @@ SECTION_PADDING = 20
 FIELD_GAP = 16
 INPUT_HEIGHT_PX = 34  # was 40 — same "denser, less air per field" reasoning as SIZE_INPUT
 INPUT_PADDING_X = 12
+TABLE_ITEM_PADDING_Y = 6  # QTableWidget::item's own vertical padding, below — named so
+                          # app/ui/dialogs/advanced_search.py can size row height/cell
+                          # widgets against it instead of a second hardcoded copy of "6".
 CORNER_RADIUS = 4  # real this time — QSS supports border-radius, unlike ttk
 
 # Field width tiers — a fixed set, not one-off pixel values per field.
@@ -343,7 +346,7 @@ def build_stylesheet():
         selection-color: {TEXT};
     }}
     QTableWidget::item {{
-        padding: 6px {INPUT_PADDING_X}px;
+        padding: {TABLE_ITEM_PADDING_Y}px {INPUT_PADDING_X}px;
         border: none;
     }}
     QTableWidget::item:alternate {{

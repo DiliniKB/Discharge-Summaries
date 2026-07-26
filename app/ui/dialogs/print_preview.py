@@ -24,6 +24,7 @@ from app import theme
 from app.db import doctors as doctors_db, summaries
 from app.printing import layout as print_layout
 from app.printing.printer import PrintUnsupportedError, print_pdf
+from app.util.screen import clamped_dialog_size
 
 _UNSAFE_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|]')
 
@@ -32,7 +33,12 @@ class PrintPreviewDialog(QDialog):
     def __init__(self, conn, summary_id, tmp_dir, doctor_id, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Print Preview")
-        self.resize(700, 900)
+        # A full A4 page preview genuinely wants 900px of height, but
+        # that's taller than the target 1366x768 screen has room for
+        # once Windows' taskbar is accounted for — clamped so the
+        # Save/Cancel/Print row at the bottom is never pushed off-screen
+        # (docs/decisions.md).
+        self.resize(*clamped_dialog_size(self, 700, 900))
 
         summary = summaries.get(conn, summary_id)
         self.summary = summary

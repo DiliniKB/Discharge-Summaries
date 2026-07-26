@@ -16,7 +16,6 @@ from app.ui.dialogs.advanced_search import (
     NAME_DEBOUNCE_MS,
     AdvancedSearchDialog,
     COLUMN_WIDTH_PADDING,
-    _ACTION_BUTTON_LABELS,
     _compute_column_widths,
 )
 from app.ui.dialogs.print_preview import PrintPreviewDialog
@@ -334,20 +333,21 @@ def test_edit_button_loads_the_summary_selects_it_and_closes_the_dialog(db_conn,
 
 
 def test_computed_column_widths_fit_the_real_actions_buttons(db_conn, qapp):
-    # Independently reconstruct the expected Actions width from real font
-    # metrics + the QSS's own known padding/border (app/theme.py) — this
-    # verifies the reasoning behind _compute_column_widths, not a copy of
-    # the same magic number it produces.
+    # Independently reconstruct the expected Actions width from real,
+    # constructed buttons plus the QSS's own known padding/border
+    # (app/theme.py) — this verifies the reasoning behind
+    # _compute_column_widths, not a copy of the same magic number it
+    # produces.
+    from PySide6.QtWidgets import QPushButton
+
     from app import theme
 
     dialog = AdvancedSearchDialog(db_conn, _FakeMainWindow())
     dialog.show()
     qapp.processEvents()
 
-    metrics = QFontMetrics(dialog.table.font())
-    expected_actions_width = sum(
-        metrics.horizontalAdvance(label) + 2 * (1 + theme.INPUT_PADDING_X) for label in _ACTION_BUTTON_LABELS
-    )
+    buttons = [QPushButton("Full View"), QPushButton("Print"), QPushButton("Edit")]
+    expected_actions_width = sum(b.sizeHint().width() for b in buttons)
     expected_actions_width += 2 * theme.SPACING_UNIT + 2 * 4
     # QTableWidget::item's own QSS padding (app/theme.py) eats this much
     # off every cell's usable width, including setCellWidget() cells —

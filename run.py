@@ -18,9 +18,11 @@ real event loop via app.exec().
 import logging
 import sys
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app import theme
+from app.config import get_app_icon_path
 from app.util.logging import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -66,6 +68,11 @@ def main():
     logger.info("Starting Discharge Summaries")
 
     app = QApplication(sys.argv)
+    # Sets the taskbar/title-bar icon for every window in the app,
+    # including the top-level exception dialog below — QIcon() on a
+    # missing file is a harmless null icon, not a crash, so this can't
+    # itself become a startup failure.
+    app.setWindowIcon(QIcon(str(get_app_icon_path())))
     _install_excepthook()
 
     win = _build_main_window(app)

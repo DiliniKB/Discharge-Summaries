@@ -42,10 +42,22 @@ from app.ui.widgets.datefield import DateField
 from app.ui.widgets.labeled import LabeledField
 from app.ui.widgets.scrollframe import ScrollFrame
 from app.ui.widgets.summary_view import populate_summary_view
+from app.util.screen import clamped_dialog_size
 
 ALL_DOCTORS_LABEL = "All doctors"
 NAME_DEBOUNCE_MS = 150
 ACTION_BUTTON_HEIGHT = 26  # explicit, not the natural QSS sizeHint — see docs/decisions.md
+_ACTIONS_CELL_MARGIN_Y = 2  # _build_actions_cell's own QHBoxLayout top/bottom margin
+# The default row height (theme.INPUT_HEIGHT_PX) is sized for a single line
+# of table TEXT, not for the Actions column's real buttons — and
+# QTableWidget::item's own vertical padding (theme.TABLE_ITEM_PADDING_Y,
+# same inset already accounted for horizontally in COLUMN_WIDTH_PADDING
+# below) eats into a *cell widget's* available height too, not just a
+# text item's. A row sized to exactly fit the buttons with no allowance
+# for that inset clips them top and bottom — confirmed by measuring a
+# real cell widget's actual on-screen height against the row height that
+# contained it, same method used for the horizontal clipping fix.
+_ROW_HEIGHT = ACTION_BUTTON_HEIGHT + 2 * _ACTIONS_CELL_MARGIN_Y + 2 * theme.TABLE_ITEM_PADDING_Y
 
 _COLUMNS = ["Patient Name", "BHT", "Ward", "Doctor", "Discharge Date", "Created", "Modified", "Actions"]
 
@@ -84,10 +96,14 @@ _WARD_SAMPLE = "999"
 # not a guess either, just the widest string that format can ever produce.
 _DISCHARGE_DATE_SAMPLE = "31/12/2026"
 _TIMESTAMP_SAMPLE = "31/12/2026 23:59"
-_ACTION_BUTTON_LABELS = ("Full View", "Print", "Edit")
-# QPushButton#SecondaryCompact / #PrimaryCompact (app/theme.py): 1px border
-# each side, INPUT_PADDING_X each side.
-_ACTION_BUTTON_HORIZONTAL_CHROME = 2 * (1 + theme.INPUT_PADDING_X)
+# (label, QSS objectName) — one shared source for both the real cell
+# (_build_actions_cell) and the width computation below, so a label
+# change can't silently desync the two.
+_ACTION_BUTTONS = (
+    ("Full View", "SecondaryCompact"),
+    ("Print", "SecondaryCompact"),
+    ("Edit", "PrimaryCompact"),
+)
 
 
 def _compute_column_widths(table):
@@ -102,7 +118,13 @@ def _compute_column_widths(table):
     def _sized(sample, header_text):
         return max(cell_metrics.horizontalAdvance(sample), header_metrics.horizontalAdvance(header_text)) + COLUMN_WIDTH_PADDING
 
-    actions_width = sum(cell_metrics.horizontalAdvance(label) + _ACTION_BUTTON_HORIZONTAL_CHROME for label in _ACTION_BUTTON_LABELS)
+    # Real, throwaway buttons (never shown, never parented into any
+    # layout) rather than a hand-derived "text width + fixed chrome"
+    # formula — measuring the actual sizeHint() can't drift out of sync
+    # with what _build_actions_cell constructs.
+    buttons_width = sum(_make_action_button(label, object_name).sizeHint().width()
+                         for label, object_name in _ACTION_BUTTONS)
+    actions_width = buttons_width
     actions_width += 2 * theme.SPACING_UNIT  # row_layout.setSpacing() between the three buttons
     actions_width += 2 * 4  # _build_actions_cell's own left/right QHBoxLayout margins
     actions_width += COLUMN_WIDTH_PADDING  # same QTableWidget::item inset applies to setCellWidget() cells too
@@ -120,6 +142,13 @@ def _compute_column_widths(table):
         7: actions_width,
     }
 
+
+def _make_action_button(label, object_name):
+    button = QPushButton(label)
+    button.setObjectName(object_name)
+    return button
+
+
 def _format_timestamp(iso_timestamp):
     """Full ISO datetime -> 'DD/MM/YYYY HH:MM'. Blank -> ''."""
     if not iso_timestamp:
@@ -136,7 +165,11 @@ class AdvancedSearchDialog(QDialog):
         self._conn = conn
         self._main_window = main_window
         self.setWindowTitle("Advanced Search")
-        self.resize(1260, 700)
+        # Clamped to the actual screen (app/util/screen.py) — same
+        # off-screen-bottom-row risk as Print Preview/Full View on the
+        # target 1366x768 Windows screen, just less severe here since
+        # only the table area shrinks, not a button row.
+        self.resize(*clamped_dialog_size(self, 1260, 700))
 
         self._doctors_by_id = {d.id: d for d in doctors_db.list_all(self._conn)}
 
@@ -315,7 +348,7 @@ class AdvancedSearchDialog(QDialog):
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(theme.INPUT_HEIGHT_PX)
+        self.table.verticalHeader().setDefaultSectionSize(_ROW_HEIGHT)
 
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Stretch)  # Patient Name absorbs remaining space
@@ -393,30 +426,26 @@ class AdvancedSearchDialog(QDialog):
     def _build_actions_cell(self, summary_id):
         cell = QWidget()
         row_layout = QHBoxLayout(cell)
-        row_layout.setContentsMargins(4, 2, 4, 2)
+        row_layout.setContentsMargins(4, _ACTIONS_CELL_MARGIN_Y, 4, _ACTIONS_CELL_MARGIN_Y)
         row_layout.setSpacing(theme.SPACING_UNIT)
 
-        # Explicit fixed height, not the buttons' natural QSS sizeHint —
-        # that's what actually fits them inside the table's row height
-        # (theme.INPUT_HEIGHT_PX, tightened for form density elsewhere)
-        # without the text getting vertically clipped (docs/decisions.md).
-        full_view_button = QPushButton("Full View")
-        full_view_button.setObjectName("SecondaryCompact")
-        full_view_button.setFixedHeight(ACTION_BUTTON_HEIGHT)
-        full_view_button.clicked.connect(lambda: self._on_full_view(summary_id))
-        row_layout.addWidget(full_view_button)
-
-        print_button = QPushButton("Print")
-        print_button.setObjectName("SecondaryCompact")
-        print_button.setFixedHeight(ACTION_BUTTON_HEIGHT)
-        print_button.clicked.connect(lambda: self._on_print(summary_id))
-        row_layout.addWidget(print_button)
-
-        edit_button = QPushButton("Edit")
-        edit_button.setObjectName("PrimaryCompact")
-        edit_button.setFixedHeight(ACTION_BUTTON_HEIGHT)
-        edit_button.clicked.connect(lambda: self._on_edit(summary_id))
-        row_layout.addWidget(edit_button)
+        # Built from the same _ACTION_BUTTONS table _compute_column_widths
+        # measures against, so a label change can't silently make the
+        # column too narrow for what's actually rendered here. Explicit
+        # fixed height, not the buttons' natural QSS sizeHint — that's
+        # what actually fits them inside the table's row height
+        # (_ROW_HEIGHT above) without getting vertically clipped
+        # (docs/decisions.md).
+        handlers = {
+            "Full View": lambda: self._on_full_view(summary_id),
+            "Print": lambda: self._on_print(summary_id),
+            "Edit": lambda: self._on_edit(summary_id),
+        }
+        for label, object_name in _ACTION_BUTTONS:
+            button = _make_action_button(label, object_name)
+            button.setFixedHeight(ACTION_BUTTON_HEIGHT)
+            button.clicked.connect(handlers[label])
+            row_layout.addWidget(button)
 
         return cell
 

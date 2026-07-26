@@ -18,13 +18,18 @@ from app.printing import layout as print_layout
 from app.ui.widgets.labeled import LabeledField
 from app.ui.widgets.scrollframe import ScrollFrame
 from app.ui.widgets.summary_view import _build_attachment_row
+from app.util.screen import clamped_dialog_size
 
 
 class SummaryFullViewDialog(QDialog):
     def __init__(self, summary, investigations, doctors_by_id, attachments=(), parent=None):
         super().__init__(parent)
         self.setWindowTitle(summary.patient_name or "Full View")
-        self.resize(760, 820)
+        # 820px of height is taller than the target 1366x768 screen has
+        # room for once Windows' taskbar is accounted for — clamped so
+        # the Close button at the bottom is never pushed off-screen
+        # (docs/decisions.md).
+        self.resize(*clamped_dialog_size(self, 760, 820))
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(

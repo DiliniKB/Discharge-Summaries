@@ -38,3 +38,12 @@ def get_attachments_dir() -> Path:
 
 def get_log_path() -> Path:
     return get_data_dir() / "app.log"
+
+
+def get_app_icon_path() -> Path:
+    """assets/app_icon.ico, resolved relative to this file rather than the
+    current working directory — same reasoning as app/db/connection.py's
+    MIGRATIONS_DIR, and the same relative layout (repo root/assets) is
+    preserved inside the PyInstaller --onedir bundle via build.spec's
+    datas entry, so this resolves correctly both from source and frozen."""
+    return Path(__file__).parent.parent / "assets" / "app_icon.ico"
