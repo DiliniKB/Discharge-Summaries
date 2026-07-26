@@ -95,6 +95,12 @@ class PatientList(QWidget):
         self.advanced_search_button.setMinimumHeight(theme.INPUT_HEIGHT_PX)
         layout.addWidget(self.advanced_search_button)
 
+        self.refresh_button = QPushButton("Refresh")
+        self.refresh_button.setObjectName("Secondary")
+        self.refresh_button.setMinimumHeight(theme.INPUT_HEIGHT_PX)
+        self.refresh_button.clicked.connect(self.refresh)
+        layout.addWidget(self.refresh_button)
+
         self._scroll = ScrollFrame()
         layout.addWidget(self._scroll, stretch=1)
 

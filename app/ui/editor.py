@@ -4,25 +4,30 @@ Action bar is real (breadcrumb updates on patient selection, buttons
 enable/disable correctly). Fields across all data-bearing sections now
 autosave through `controller` (app/ui/editor_controller.py) — see
 bind_controller() on each section. Print opens the real Print Preview
-dialog (app/ui/dialogs/print_preview.py). Duplicate/Delete remain
-shells, see the TODOs below.
+dialog (app/ui/dialogs/print_preview.py). Duplicate/Delete are real too —
+Editor has no reference to PatientList/MainWindow, so it announces both
+via signals (duplicated/deleted) rather than reaching into either, same
+shape as the existing controller.saved -> patient_list.refresh wiring in
+main_window.py.
 """
 
 import datetime
 import tempfile
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
     QMenu,
+    QMessageBox,
     QPushButton,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+from app.db import summaries
 from app.ui.dialogs.print_preview import PrintPreviewDialog
 
 from app import theme
@@ -37,6 +42,9 @@ ACTION_BAR_HEIGHT = 64
 
 
 class Editor(QWidget):
+    duplicated = Signal(int)  # new summary_id
+    deleted = Signal()
+
     def __init__(self, controller, parent=None):
         super().__init__(parent)
         self.controller = controller
@@ -165,7 +173,34 @@ class Editor(QWidget):
         self.controller.flush()
 
     def _on_duplicate(self):
-        pass  # TODO(db chunk): needs a real summary to copy.
+        if self.controller.summary_id is None:
+            return
+        self.controller.flush()  # must not duplicate stale unsaved edits — same reasoning as _on_print
+        new_summary = self.controller.duplicate_summary(self.controller.summary_id)
+        self.load_summary(new_summary.id)
+        self.duplicated.emit(new_summary.id)
 
     def _on_delete(self):
-        pass  # TODO(db chunk): needs the type-name-to-confirm dialog + soft-delete in the DB.
+        if self.controller.summary_id is None:
+            return
+        current = summaries.get(self.controller.conn, self.controller.summary_id)
+        name = current.patient_name or "this record"
+        # Single-click confirm, not a typed-name dialog — Recently Deleted
+        # (app/ui/dialogs/recently_deleted.py) is the real safety net now,
+        # so the heavier friction wasn't earning its keep (docs/decisions.md).
+        # Default button is No so Enter/Return can't accidentally confirm.
+        reply = QMessageBox.question(
+            self,
+            "Delete Summary",
+            f'Delete "{name}"? You can restore it later from Recently Deleted.',
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        summaries.soft_delete(self.controller.conn, self.controller.summary_id)
+        self.controller.clear()
+        self._name_label.setText("No summary open")
+        self._meta_label.setText("")
+        self._set_has_open_summary(False)
+        self.deleted.emit()

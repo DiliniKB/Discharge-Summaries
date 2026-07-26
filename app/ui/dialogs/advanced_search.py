@@ -14,6 +14,7 @@ import tempfile
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDialog,
     QHBoxLayout,
@@ -73,6 +74,11 @@ class AdvancedSearchDialog(QDialog):
 
         root.addLayout(self._build_filter_row())
 
+        self._status_label = QLabel("")
+        self._status_label.setObjectName("Muted")
+        self._status_label.setVisible(False)
+        root.addWidget(self._status_label)
+
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self._build_results_table())
         splitter.addWidget(self._build_view_panel())
@@ -123,15 +129,15 @@ class AdvancedSearchDialog(QDialog):
             self._doctor_ids_by_index.append(doctor.id)
         top_row.addWidget(LabeledField("Doctor", self.doctor_picker))
 
-        search_button = QPushButton("Search")
-        search_button.setObjectName("Primary")
-        search_button.setMinimumHeight(theme.INPUT_HEIGHT_PX)
-        search_button.clicked.connect(self._run_search)
+        self.search_button = QPushButton("Search")
+        self.search_button.setObjectName("Primary")
+        self.search_button.setMinimumHeight(theme.INPUT_HEIGHT_PX)
+        self.search_button.clicked.connect(self._run_search)
         clear_button = QPushButton("Clear filters")
         clear_button.setObjectName("Secondary")
         clear_button.setMinimumHeight(theme.INPUT_HEIGHT_PX)
         clear_button.clicked.connect(self._clear_filters)
-        top_row.addWidget(self._button_row_aligned_with_inputs(search_button, clear_button))
+        top_row.addWidget(self._button_row_aligned_with_inputs(self.search_button, clear_button))
         container.addLayout(top_row)
 
         self.keyword_input = QLineEdit()
@@ -226,18 +232,31 @@ class AdvancedSearchDialog(QDialog):
         return self.table
 
     def _run_search(self):
-        doctor_id = self._doctor_ids_by_index[self.doctor_picker.currentIndex()]
-        results = summaries.advanced_search(
-            self._conn,
-            patient_name=self.patient_name_input.text().strip(),
-            keyword=self.keyword_input.text().strip(),
-            doctor_id=doctor_id,
-            created_from=self.created_from.get_iso() or None,
-            created_to=self.created_to.get_iso() or None,
-            modified_from=self.modified_from.get_iso() or None,
-            modified_to=self.modified_to.get_iso() or None,
-        )
-        self._render_results(results)
+        # Fully synchronous (no QThread anywhere in this codebase, and
+        # CLAUDE.md rules out async generally) — the processEvents() pump
+        # is what actually gets "Searching…" painted before the
+        # (blocking) query runs, the standard trick for visible-but-
+        # synchronous work in Qt.
+        self.search_button.setEnabled(False)
+        self._status_label.setText("Searching…")
+        self._status_label.setVisible(True)
+        QApplication.processEvents()
+        try:
+            doctor_id = self._doctor_ids_by_index[self.doctor_picker.currentIndex()]
+            results = summaries.advanced_search(
+                self._conn,
+                patient_name=self.patient_name_input.text().strip(),
+                keyword=self.keyword_input.text().strip(),
+                doctor_id=doctor_id,
+                created_from=self.created_from.get_iso() or None,
+                created_to=self.created_to.get_iso() or None,
+                modified_from=self.modified_from.get_iso() or None,
+                modified_to=self.modified_to.get_iso() or None,
+            )
+            self._render_results(results)
+        finally:
+            self._status_label.setVisible(False)
+            self.search_button.setEnabled(True)
 
     def _render_results(self, results):
         # setRowCount()/setItem() below fire itemSelectionChanged as Qt's

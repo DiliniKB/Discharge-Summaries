@@ -2,6 +2,7 @@
 
 from PySide6.QtTest import QTest
 
+from app.db import doctors as doctors_db
 from app.db import summaries
 from app.models import Summary
 from app.ui.editor_controller import EditorController
@@ -91,6 +92,64 @@ def test_set_investigation_persists_and_noops_when_unchanged(db_conn, qapp):
 
     ctrl.set_investigation("FBS", "86")  # unchanged — should no-op
     assert not ctrl._timer.isActive()
+
+
+def test_duplicate_summary_copies_fields_but_not_investigations(db_conn):
+    doctors_db.seed_if_empty(db_conn)
+    doc_a, doc_b = doctors_db.list_active(db_conn)[:2]
+
+    ctrl = EditorController(db_conn)
+    ctrl.current_doctor_id = doc_a.id
+    original = summaries.create(
+        db_conn,
+        Summary(
+            patient_name="W.D. Kusuma Wijerathna",
+            bht_number="10178",
+            procedure_title="thyroidectomy",
+            findings="benign nodule",
+            created_by=doc_b.id,
+            last_edited_by=doc_b.id,
+        ),
+    )
+    summaries.upsert_investigation(
+        db_conn,
+        next(i for i in summaries.list_investigations(db_conn, original.id) if i["label"] == "FBS")["id"],
+        original.id, "FBS", "999", "mg/dL", 0,
+    )
+
+    duplicate = ctrl.duplicate_summary(original.id)
+
+    assert duplicate.id != original.id
+    assert duplicate.patient_name == "W.D. Kusuma Wijerathna"
+    assert duplicate.bht_number == "10178"
+    assert duplicate.procedure_title == "thyroidectomy"
+    assert duplicate.findings == "benign nodule"
+    assert duplicate.created_at != ""
+    assert duplicate.created_by == doc_a.id, "stamped with the CURRENT doctor, not copied from the source"
+    assert duplicate.last_edited_by == doc_a.id
+
+    dup_investigations = {i["label"]: i["value"] for i in summaries.list_investigations(db_conn, duplicate.id)}
+    assert dup_investigations["FBS"] == "", "investigation VALUES are not copied — patient-specific lab data"
+    assert len(dup_investigations) == 7, "still gets the 7 blank standard rows, same as any new summary"
+
+    assert ctrl.summary_id == duplicate.id, "controller now points at the new duplicate, same as new_summary()"
+
+
+def test_clear_resets_to_no_summary_open_without_touching_the_db(db_conn):
+    ctrl = EditorController(db_conn)
+    created = ctrl.new_summary()
+    ctrl.set_field("patient_name", "W.D. Kusuma Wijerathna")
+
+    assert ctrl._timer.isActive()
+    ctrl.clear()
+
+    assert not ctrl._timer.isActive(), "a stray armed timer must not fire flush() later against a cleared state"
+    assert ctrl.summary_id is None
+    assert ctrl._pending_fields == {}
+    assert ctrl._db_values == {}
+    assert ctrl._db_investigations == {}
+    # The DB row itself is untouched — clear() must never delete anything.
+    assert summaries.get(db_conn, created.id) is not None
 
 
 def test_switching_summaries_auto_flushes_the_previous_one(db_conn):

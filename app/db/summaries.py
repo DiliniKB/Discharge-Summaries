@@ -177,6 +177,24 @@ def soft_delete(conn, summary_id):
     conn.commit()
 
 
+def list_deleted(conn, limit=200):
+    """Backs the Recently Deleted dialog. No purge job exists yet
+    (docs/decisions.md), so this shows every soft-deleted row, not just
+    the last 30 days — that matches actual current behavior rather than
+    pretending a purge runs. Still not SELECT * (CLAUDE.md hard rule)."""
+    rows = conn.execute(
+        "SELECT id, patient_name, bht_number, ward, deleted_at FROM summaries "
+        "WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def restore(conn, summary_id):
+    conn.execute("UPDATE summaries SET deleted_at = NULL WHERE id = ?", (summary_id,))
+    conn.commit()
+
+
 def create_default_investigations(conn, summary_id):
     """Seven standard rows on every new summary — docs/decisions.md."""
     for label, unit, sort_order in STANDARD_ANALYTES:

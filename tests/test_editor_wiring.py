@@ -2,6 +2,7 @@
 Editor and real DB, not just calling handler functions directly."""
 
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QMessageBox
 
 from app.db import summaries
 from app.db import templates as templates_db
@@ -203,6 +204,94 @@ def test_attachment_added_through_the_real_editor_survives_a_reload(db_conn, qap
 
     editor.close()
     fresh_editor.close()
+
+
+def test_duplicate_creates_a_second_row_and_repopulates_the_editor(db_conn, qapp):
+    editor, controller = _make_editor(db_conn)
+    created = controller.new_summary()
+    editor.load_summary(created.id)
+    qapp.processEvents()
+
+    ps = editor.patient_section
+    ps.name_input.setText("W.D. Kusuma Wijerathna")
+    ps.name_input.editingFinished.emit()
+    proc = editor.procedure_section
+    proc.title_input.setText("THYROIDECTOMY")
+    proc.title_input.editingFinished.emit()
+    qapp.processEvents()
+    QTest.qWait(350)
+    qapp.processEvents()
+
+    duplicated_ids = []
+    editor.duplicated.connect(duplicated_ids.append)
+
+    editor._on_duplicate()
+    qapp.processEvents()
+
+    assert len(duplicated_ids) == 1
+    new_id = duplicated_ids[0]
+    assert new_id != created.id
+    assert editor.patient_section.name_input.text() == "W.D. Kusuma Wijerathna", "editor repopulated with the duplicate"
+    assert editor.procedure_section.title_input.text() == "THYROIDECTOMY"
+
+    new_row = summaries.get(db_conn, new_id)
+    assert new_row.patient_name == "W.D. Kusuma Wijerathna"
+    new_investigations = {i["label"]: i["value"] for i in summaries.list_investigations(db_conn, new_id)}
+    assert all(v == "" for v in new_investigations.values()), "duplicate gets blank investigations, not copied values"
+
+    editor.close()
+
+
+def test_delete_confirmed_soft_deletes_and_resets_the_editor_to_empty(db_conn, qapp, monkeypatch):
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+
+    editor, controller = _make_editor(db_conn)
+    created = controller.new_summary()
+    editor.load_summary(created.id)
+    qapp.processEvents()
+
+    ps = editor.patient_section
+    ps.name_input.setText("W.D. Kusuma Wijerathna")
+    ps.name_input.editingFinished.emit()
+    QTest.qWait(350)
+    qapp.processEvents()
+
+    deleted_events = {"count": 0}
+    editor.deleted.connect(lambda: deleted_events.__setitem__("count", deleted_events["count"] + 1))
+
+    editor._on_delete()
+    qapp.processEvents()
+
+    assert deleted_events["count"] == 1
+    assert editor._name_label.text() == "No summary open"
+    assert editor.print_button.isEnabled() is False
+    assert controller.summary_id is None
+
+    still_there = summaries.get(db_conn, created.id)
+    assert still_there is not None, "soft delete — the row still physically exists"
+    assert still_there.deleted_at is not None
+    assert len(summaries.list_page(db_conn)) == 0, "but no longer shows up in the normal list"
+
+
+def test_delete_declined_leaves_the_record_untouched(db_conn, qapp, monkeypatch):
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.No)
+
+    editor, controller = _make_editor(db_conn)
+    created = controller.new_summary()
+    editor.load_summary(created.id)
+    qapp.processEvents()
+
+    deleted_events = {"count": 0}
+    editor.deleted.connect(lambda: deleted_events.__setitem__("count", deleted_events["count"] + 1))
+
+    editor._on_delete()
+    qapp.processEvents()
+
+    assert deleted_events["count"] == 0
+    assert controller.summary_id == created.id, "editor still has the record open"
+    assert summaries.get(db_conn, created.id).deleted_at is None
+
+    editor.close()
 
 
 def test_save_button_force_flushes_with_no_wait(db_conn, qapp):

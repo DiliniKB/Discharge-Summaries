@@ -60,6 +60,44 @@ class EditorController(QObject):
         self._load_snapshot(summary)
         return summary
 
+    def duplicate_summary(self, summary_id):
+        """Copies every clinical-text/identity field from an existing
+        record into a brand new one — id, timestamps, and doctor
+        attribution are fresh, same as new_summary(). Investigation
+        values and attachments are deliberately NOT copied: create()
+        already reseeds the 7 blank standard analytes, and carrying over
+        lab values or files from one patient onto what becomes a
+        different record would be a real clinical-safety risk, unlike
+        copying narrative text (docs/decisions.md)."""
+        source = summaries.get(self._conn, summary_id)
+        duplicate = dataclasses.replace(
+            source,
+            id=None,
+            created_at="",
+            updated_at="",
+            deleted_at=None,
+            created_by=self.current_doctor_id,
+            last_edited_by=self.current_doctor_id,
+        )
+        created = summaries.create(self._conn, duplicate)
+        self._load_snapshot(created)
+        return created
+
+    def clear(self):
+        """Resets to 'no summary open' without touching the DB — used
+        after a delete, since the controller must stop pointing at a row
+        that no longer exists. Stops the debounce timer explicitly — a
+        stray armed QTimer firing flush() later against a cleared/
+        different summary_id is exactly the class of bug this codebase
+        has been bitten by before (the search-debounce timer, see
+        tests/test_editor.py's history)."""
+        self._timer.stop()
+        self.summary_id = None
+        self._db_values = {}
+        self._pending_fields = {}
+        self._db_investigations = {}
+        self._pending_investigations = {}
+
     def _load_snapshot(self, summary):
         self.flush()  # save whatever was open before, silently — §7
         self.summary_id = summary.id

@@ -26,6 +26,7 @@ from app.db import doctors as doctors_db
 from app.db import templates as templates_db
 from app.ui.dialogs.advanced_search import AdvancedSearchDialog
 from app.ui.dialogs.doctors import DoctorsDialog
+from app.ui.dialogs.recently_deleted import RecentlyDeletedDialog
 from app.ui.dialogs.settings import BACKUP_PATH_KEY, SettingsDialog
 from app.ui.dialogs.templates import TemplatesDialog
 from app.ui.editor import Editor
@@ -80,6 +81,8 @@ class MainWindow(QMainWindow):
         self.patient_list.patient_selected.connect(self.editor.load_summary)
         self.patient_list.new_card_button.clicked.connect(self._on_new_card)
         self.patient_list.advanced_search_button.clicked.connect(self._open_advanced_search)
+        self.editor.duplicated.connect(self._on_summary_duplicated)
+        self.editor.deleted.connect(self._on_summary_deleted)
         # A save can change what a card should display (name/BHT typed
         # into a previously-blank new card) — refresh the list so it
         # stays truthful, not just the open editor.
@@ -103,6 +106,13 @@ class MainWindow(QMainWindow):
         self.editor.load_summary(created.id)
         self.patient_list.refresh()
         self.patient_list.select(created.id)
+
+    def _on_summary_duplicated(self, new_id):
+        self.patient_list.refresh()
+        self.patient_list.select(new_id)
+
+    def _on_summary_deleted(self):
+        self.patient_list.refresh()
 
     def _install_shortcuts(self):
         # docs/ui-spec.md §7. Print/Save shortcuts only fire when those
@@ -166,6 +176,12 @@ class MainWindow(QMainWindow):
         layout.addWidget(doctor_picker)
         self._doctor_picker = doctor_picker
 
+        self._recently_deleted_button = QToolButton()
+        self._recently_deleted_button.setText("🗑")
+        self._recently_deleted_button.setToolTip("Recently Deleted")
+        self._recently_deleted_button.clicked.connect(self._open_recently_deleted)
+        layout.addWidget(self._recently_deleted_button)
+
         settings_button = QToolButton()
         settings_button.setText("⚙")
         settings_button.clicked.connect(self._open_settings)
@@ -176,6 +192,11 @@ class MainWindow(QMainWindow):
     def _open_settings(self):
         dialog = SettingsDialog(self._conn, self)
         dialog.exec()
+
+    def _open_recently_deleted(self):
+        dialog = RecentlyDeletedDialog(self._conn, self, self)
+        dialog.exec()
+        self.patient_list.refresh()
 
     def closeEvent(self, event):
         # Never lose a pending edit on exit, and never leave the connection

@@ -29,6 +29,7 @@ These follow from the machine and the setting, not from taste.
 3. **Print preview** — modal, shows the A4 card at true proportions
 4. **Template manager** — modal, edit canned procedure text
 5. **Settings** — modal, printer default, backup path, doctor list
+6. **Recently Deleted** — modal, reached from the header, restores a soft-deleted summary
 
 ---
 
@@ -81,13 +82,15 @@ These follow from the machine and the setting, not from taste.
 ### 3.1 Header (56 px)
 
 - Left: unit name, static.
-- Right: doctor dropdown. Persists across sessions in settings. Value prints on the card as the issuing officer.
+- Right: doctor dropdown, then 🗑 Recently Deleted, then ⚙ Settings. Doctor value persists across sessions and prints on the card as the issuing officer.
+- **Recently Deleted** — lists every soft-deleted summary (no purge job exists yet, so this is everything ever deleted, not just the last 30 days — `docs/decisions.md`), each with a Restore button. A standalone maintenance action, not tied to whichever record is open, same as Settings.
 - No login, no avatar, no admin badge.
 
 ### 3.2 Patient list pane (280 px, fixed)
 
 - **New Card** — full-width primary button, top. Creates a blank record and focuses the Name field.
 - **Advanced Search** — full-width secondary button, below New Card. Opens the Advanced Search modal (§3.2a) — this pane has no search box of its own anymore.
+- **Refresh** — full-width secondary button, below Advanced Search. Re-runs the default list query without switching the open record — the list otherwise only updates after this app's own saves/creates, not changes made elsewhere (e.g. this session's own load-test scripts).
 - **Cards** — name (bold, 15 px), then `BHT · Ward` and discharge date (13 px, grey). Discharge date matters because re-admissions produce duplicate names.
 - Sorted by discharge date descending — always the default browsing list, unfiltered. Unsaved new cards pin to the top with a dot marker.
 - Selected card: 3 px left accent bar, tinted background.
@@ -102,6 +105,7 @@ Replaces the old inline search box entirely — this is the only way to filter o
 - **Clicking a row** shows its full record in the view panel directly — no separate View button; a click is enough for something non-destructive and reversible.
 - **Actions** column, per row: **Print** (opens the same Print Preview modal as the editor's Print button), **Edit** (loads the record into the main editor and closes this dialog) — kept as explicit buttons since both are real, consequential operations, unlike just looking.
 - **View panel** — alongside the results table. Leads with an identity line (name, age/sex, BHT, ward) and doctor attribution (created/last edited by, with timestamps), then Admission / Procedure / Clinical History / Investigations & Management, grouped the same way as the editor's sections. Blank fields are omitted entirely rather than shown as "—" — same "omit if nothing to show" rule the printed card already follows (`docs/print-layout.md`). Investigation values are shown inline (`FBS 86 · SCr 40 · ...`) — previously missing from this panel entirely. Not a PDF — instant, no render cost per click (docs/decisions.md).
+- **Loading state** — Search disables itself and shows "Searching…" while the query runs (synchronous, no threading — CLAUDE.md rules out async generally). Barely visible on a fast dev machine; matters more on the target HDD.
 
 ### 3.3 Editor pane
 
@@ -111,7 +115,7 @@ Scrollable region (`Canvas` + `Scrollbar`) since content exceeds 768 px.
 - Patient name and BHT as a live-updating breadcrumb, so the user always knows which record is open.
 - **Print** — primary, leftmost. Most-used action.
 - **Save** — secondary. Autosave makes it mostly redundant, but its presence reassures.
-- **⋮ overflow** — Duplicate, Delete. Delete is buried and confirms with the patient name typed back.
+- **⋮ overflow** — Duplicate, Delete. **Duplicate** copies patient identity, dates, and all clinical narrative text into a brand-new record (fresh id, timestamps, and doctor attribution — stamped with whoever's currently selected in the header, not copied from the source); investigation values and attachments are deliberately NOT copied — reused text is fine as a starting point, but carrying over another patient's lab results or files onto a new record is a real safety risk, not a convenience (`docs/decisions.md`). **Delete** is a single Yes/No confirm (no typing required) — Recently Deleted (below) is the real safety net now, not a heavier confirmation step.
 - Save state indicator: `✓ Saved 14:32` / `Saving…` / `⚠ Not saved`.
 
 **Sections** are collapsible panels with a chevron. State persists per-user.
@@ -231,7 +235,7 @@ Segoe UI (present on every Windows 10 install; no font shipping needed).
 | `Esc` | Close modal (native Qt `QDialog` behaviour). |
 | `Tab` | Next field in paper-form order, skipping collapsed sections. |
 | Switch patient with unsaved edits | Save silently. No dialog — autosave means there is nothing to ask about. |
-| Delete | Confirm by typing the patient name. Soft-delete: flag the row, purge after 30 days. |
+| Delete | Confirm with a single Yes/No click. Soft-delete: flag the row, purge after 30 days, restorable from Recently Deleted in the meantime. |
 | Advanced Search returns nothing | Empty results table — filters are visible above it, inviting adjustment rather than a dead end. |
 | Empty database | Centred message with a single New Card call to action. |
 

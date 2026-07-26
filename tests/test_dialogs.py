@@ -2,8 +2,11 @@
 opening through the real MainWindow header dropdowns."""
 
 from app.db import doctors as doctors_db
+from app.db import summaries
 from app.db import templates as templates_db
+from app.models import Summary
 from app.ui.dialogs.doctors import DoctorsDialog
+from app.ui.dialogs.recently_deleted import RecentlyDeletedDialog
 from app.ui.dialogs.templates import TemplatesDialog
 from app.ui.main_window import MANAGE_DOCTORS_LABEL, MainWindow
 
@@ -125,5 +128,32 @@ def test_manage_doctors_sentinel_opens_dialog_without_changing_selection(isolate
 
     proc = win.editor.procedure_section
     assert proc.template_picker.itemText(proc.template_picker.count() - 1) == "Manage templates…"
+
+    win.close()
+
+
+def test_recently_deleted_button_opens_the_dialog_and_refreshes_after(isolated_data_dir, qapp, monkeypatch):
+    monkeypatch.setattr(RecentlyDeletedDialog, "exec", lambda self: self.show())
+
+    win = MainWindow()
+    win.show()
+    qapp.processEvents()
+
+    created = summaries.create(win._conn, Summary(patient_name="W.D. Kusuma Wijerathna", bht_number="10178"))
+    summaries.soft_delete(win._conn, created.id)
+
+    win._recently_deleted_button.click()
+    qapp.processEvents()
+
+    opened = [w for w in qapp.topLevelWidgets() if isinstance(w, RecentlyDeletedDialog)]
+    assert len(opened) == 1
+    dialog = opened[0]
+    assert len(dialog._rows) == 1
+
+    record = summaries.list_deleted(win._conn)[0]
+    dialog._on_restore(record)  # calls back into main_window.patient_list.refresh() itself
+    qapp.processEvents()
+
+    assert any(c.patient["id"] == created.id for c in win.patient_list._cards), "restored record reappears without a manual Refresh click"
 
     win.close()

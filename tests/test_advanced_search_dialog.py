@@ -43,6 +43,35 @@ def _seed_two(conn):
     return first, second, doc_a, doc_b
 
 
+def test_search_shows_a_loading_state_while_running(db_conn, qapp, monkeypatch):
+    _seed_two(db_conn)
+    dialog = AdvancedSearchDialog(db_conn, _FakeMainWindow())
+    dialog.show()
+
+    observed = {}
+    original_advanced_search = summaries.advanced_search
+
+    def _instrumented_search(*args, **kwargs):
+        # This is the only way to observe the transient loading state in
+        # a fully synchronous call — by the time _run_search() returns to
+        # the caller, the label is already hidden again.
+        observed["label_visible"] = dialog._status_label.isVisible()
+        observed["label_text"] = dialog._status_label.text()
+        observed["button_enabled"] = dialog.search_button.isEnabled()
+        return original_advanced_search(*args, **kwargs)
+
+    monkeypatch.setattr(summaries, "advanced_search", _instrumented_search)
+    dialog._run_search()
+
+    assert observed["label_visible"] is True
+    assert observed["label_text"] == "Searching…"
+    assert observed["button_enabled"] is False
+
+    # Back to the resting state once the (synchronous) search returns.
+    assert dialog._status_label.isVisible() is False
+    assert dialog.search_button.isEnabled() is True
+
+
 def test_dialog_opens_and_lists_everyone_with_no_filters(db_conn, qapp):
     _seed_two(db_conn)
     dialog = AdvancedSearchDialog(db_conn, _FakeMainWindow())

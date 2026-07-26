@@ -174,9 +174,33 @@ Blobs bloat the database file, slowing every query and making the on-exit backup
 
 ## Soft delete with a 30-day purge
 
-**Decision:** `deleted_at` timestamp; rows purged by a maintenance pass after 30 days. Delete confirms by typing the patient name.
+**Decision:** `deleted_at` timestamp; rows purged by a maintenance pass after 30 days. Delete confirms with a single Yes/No click; Recently Deleted (below) is the actual undo path.
 
 There is one database file on one unmirrored drive. A misclick should not be terminal.
+
+**Editor announces Duplicate/Delete via signals, not a direct reference to PatientList.** `Editor` has never held a reference to `PatientList`/`MainWindow` — it emits `duplicated`/`deleted`, and `MainWindow` connects them to `patient_list.refresh()`/`select()`, the same shape as the existing `controller.saved -> patient_list.refresh` wiring. Reaching into `PatientList` directly from `Editor` would tie two widgets together that today only know about each other through `MainWindow`.
+
+**Duplicate copies clinical text but not investigation values or attachments.** A duplicated record shares the same rationale as `docs/decisions.md`'s existing "templates insert text, don't link" entry — reusing narrative text (procedure steps, findings, indication) as a starting point is a convenience. Reusing lab values or attached files would mean a new record silently carrying another patient's concrete clinical data forward, which is a safety risk, not a convenience — `create()` already reseeds the 7 blank standard investigation rows for any new record, duplicate included.
+
+---
+
+## Recently Deleted replaces typed-name delete confirmation
+
+**Decision:** Delete confirms with a single `QMessageBox.question` Yes/No click. A new header action, Recently Deleted (`app/ui/dialogs/recently_deleted.py`), lists every soft-deleted summary with a Restore button — that's the real safety net now, not the confirmation step.
+
+The typed-name confirmation (`ConfirmDeleteDialog`) existed because a soft delete, at the time, had no way back except editing the database directly. Once Restore exists, a misclick is a two-click recovery (open Recently Deleted, click Restore) rather than something the confirmation dialog had to prevent outright — the heavier friction stopped earning its keep, so it was removed rather than kept as a redundant extra step. `ConfirmDeleteDialog` was deleted outright, not left as dead code.
+
+**Recently Deleted shows everything ever soft-deleted, not just the last 30 days.** No purge job exists in the code yet — filtering the view to 30 days would hide records that still physically exist in the database and would otherwise become unreachable through the UI entirely. Showing everything matches actual current behavior instead of pretending a purge runs. Revisit this once a real purge job exists.
+
+**Header button, not tied to the open record.** Restoring isn't an action on "this patient" — it's a standalone maintenance action, same reasoning as Settings living in the header rather than the list pane or editor.
+
+---
+
+## Advanced Search's loading state is synchronous, not threaded
+
+**Decision:** disable the Search button and show a "Searching…" label, with a single `QApplication.processEvents()` call before the (blocking) query runs.
+
+No `QThread`/async infrastructure exists anywhere in this codebase, and CLAUDE.md rules out async generally for this project. Rather than introduce threading for one dialog, this uses the standard synchronous-Qt trick: pump the event loop once so the "Searching…" state actually paints before the blocking call, then run the query in place. Barely visible on this dev machine's SSD; the whole point is the target laptop's HDD, where `advanced_search()`'s keyword filter (an accepted unindexed scan — see the Advanced Search entry above) is more likely to take long enough to matter.
 
 ---
 

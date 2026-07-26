@@ -187,3 +187,33 @@ def test_soft_delete(db_conn):
     assert len(summaries.list_page(conn)) == 0
     still_there = conn.execute("SELECT COUNT(*) AS c FROM summaries WHERE id = ?", (created.id,)).fetchone()["c"]
     assert still_there == 1, "soft-deleted row still physically exists (not a hard delete)"
+
+
+def test_list_deleted_scoped_to_soft_deleted_rows_only(db_conn):
+    conn = db_conn
+    live = summaries.create(conn, Summary(patient_name="Still Live", bht_number="1"))
+    deleted_first = summaries.create(conn, Summary(patient_name="Deleted First", bht_number="2"))
+    deleted_second = summaries.create(conn, Summary(patient_name="Deleted Second", bht_number="3"))
+
+    summaries.soft_delete(conn, deleted_first.id)
+    time.sleep(1.1)  # ISO timestamp has second resolution — ensure deleted_at actually differs for ordering
+    summaries.soft_delete(conn, deleted_second.id)
+
+    deleted = summaries.list_deleted(conn)
+    assert [r["id"] for r in deleted] == [deleted_second.id, deleted_first.id], "most-recently-deleted first"
+    assert live.id not in [r["id"] for r in deleted]
+    assert set(deleted[0].keys()) == {"id", "patient_name", "bht_number", "ward", "deleted_at"}
+
+
+def test_restore_clears_deleted_at_and_reappears_in_normal_views(db_conn):
+    conn = db_conn
+    created = summaries.create(conn, Summary(patient_name="W.D. Kusuma Wijerathna", bht_number="10178"))
+    summaries.soft_delete(conn, created.id)
+    assert len(summaries.list_page(conn)) == 0
+
+    summaries.restore(conn, created.id)
+
+    assert summaries.get(conn, created.id).deleted_at is None
+    assert len(summaries.list_page(conn)) == 1
+    assert len(summaries.list_deleted(conn)) == 0
+    assert len(summaries.advanced_search(conn)) == 1

@@ -58,6 +58,20 @@ def test_advanced_search_button_opens_the_dialog_instead_of_an_inline_search_box
     assert pl.advanced_search_button.text() == "Advanced Search"
 
 
+def test_refresh_button_reruns_the_query(db_conn):
+    pl = PatientList(db_conn)
+    pl.show()
+    assert len(pl._cards) == 0
+
+    # Added directly via the DB, bypassing the widget entirely — Refresh
+    # must pick it up without needing patient_selected/saved to fire.
+    summaries.create(db_conn, Summary(patient_name="A.B. Perera", bht_number="10202"))
+    pl.refresh_button.click()
+
+    assert len(pl._cards) == 1
+    assert pl._cards[0].patient["patient_name"] == "A.B. Perera"
+
+
 def test_no_summaries_yet_empty_state(db_conn):
     pl = PatientList(db_conn)
     pl.show()
