@@ -24,14 +24,18 @@ from app.printing.printer import PrintUnsupportedError, print_pdf
 
 
 class PrintPreviewDialog(QDialog):
-    def __init__(self, conn, summary_id, tmp_dir, parent=None):
+    def __init__(self, conn, summary_id, tmp_dir, doctor_id, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Print Preview")
         self.resize(700, 900)
 
         summary = summaries.get(conn, summary_id)
         investigations = summaries.list_investigations(conn, summary_id)
-        doctor = doctors_db.get(conn, summary.created_by) if summary.created_by else None
+        # The signing officer is whoever is CURRENTLY selected in the
+        # header when printing, not summary.created_by — a different
+        # doctor may have created the record than the one discharging/
+        # signing it now (docs/decisions.md).
+        doctor = doctors_db.get(conn, doctor_id) if doctor_id else None
 
         self.pdf_path = print_layout.render_summary(summary, investigations, doctor, tmp_dir)
 

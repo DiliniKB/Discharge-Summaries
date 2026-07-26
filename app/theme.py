@@ -24,7 +24,7 @@ FONT_FAMILY = "Segoe UI"  # ships with Windows 10; substituted on other platform
 
 SIZE_SECTION_HEADER = 13
 SIZE_FIELD_LABEL = 13
-SIZE_INPUT = 16
+SIZE_INPUT = 14  # was 16 — felt oversized/spacious for a form doctors fill quickly between patients (docs/decisions.md)
 SIZE_PATIENT_NAME = 15
 SIZE_METADATA = 13
 SIZE_PROCEDURE_TITLE = 18
@@ -35,7 +35,7 @@ SIZE_HEADER_TITLE = 14
 SPACING_UNIT = 4
 SECTION_PADDING = 20
 FIELD_GAP = 16
-INPUT_HEIGHT_PX = 40
+INPUT_HEIGHT_PX = 34  # was 40 — same "denser, less air per field" reasoning as SIZE_INPUT
 INPUT_PADDING_X = 12
 CORNER_RADIUS = 4  # real this time — QSS supports border-radius, unlike ttk
 

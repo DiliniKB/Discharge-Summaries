@@ -196,6 +196,22 @@ The typed-name confirmation (`ConfirmDeleteDialog`) existed because a soft delet
 
 ---
 
+## Print signature follows the currently selected doctor, not the record's creator
+
+**Decision:** `PrintPreviewDialog` now takes an explicit `doctor_id` parameter — the caller (Editor's Print button, Advanced Search's per-row Print) always passes whichever doctor is currently selected in the header (`controller.current_doctor_id` / `main_window.selected_doctor.id`). It no longer derives the signature from `summary.created_by`.
+
+A different doctor can create a record than the one who actually discharges and signs it — the doctor physically at the PC, selected in the header at the moment of printing, is the one putting their name on the printed card, not whoever happened to start the digital entry. `created_by`/`last_edited_by` remain the DB audit trail (who touched the record and when); the printed signature is a separate, deliberately-current-moment decision now.
+
+---
+
+## Input text and field height reduced (16px/40px -> 14px/34px)
+
+**Decision:** `theme.SIZE_INPUT` 16 -> 14, `theme.INPUT_HEIGHT_PX` 40 -> 34.
+
+The original spec sizes were spacious enough that, at the target 1366×768 resolution, only Patient & Admission plus the start of Procedure fit before scrolling — for a form doctors are filling out quickly between patients, that read as more work than it needed to be. Confirmed by comparing real rendered screenshots at both sizes before changing anything: the smaller size fits meaningfully more of the form in the same viewport (all of Patient & Admission plus all of Procedure's short fields) while staying clearly legible. Field labels (13px) and the procedure-title/patient-name emphasis sizes were left alone — only the base input size and the box height around it changed.
+
+---
+
 ## Advanced Search's loading state is synchronous, not threaded
 
 **Decision:** disable the Search button and show a "Searching…" label, with a single `QApplication.processEvents()` call before the (blocking) query runs.

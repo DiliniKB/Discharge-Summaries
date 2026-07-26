@@ -429,8 +429,12 @@ class AdvancedSearchDialog(QDialog):
         self._render_view_panel(summary, investigations)
 
     def _on_print(self, summary_id):
+        # Same "currently selected header doctor signs" rule as the
+        # editor's own Print button (docs/decisions.md) — not whichever
+        # doctor created this particular row.
+        doctor_id = self._main_window.selected_doctor.id
         with tempfile.TemporaryDirectory() as tmp_dir:
-            dialog = PrintPreviewDialog(self._conn, summary_id, tmp_dir, self)
+            dialog = PrintPreviewDialog(self._conn, summary_id, tmp_dir, doctor_id, self)
             dialog.exec()
 
     def _on_edit(self, summary_id):

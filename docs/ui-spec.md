@@ -208,14 +208,14 @@ Segoe UI (present on every Windows 10 install; no font shipping needed).
 |---|---|---|
 | Section header | 13 px | Semibold, uppercase, letter-spaced |
 | Field label | 13 px | Regular, muted |
-| Input text | 16 px | Regular |
+| Input text | 14 px | Regular |
 | Patient name (list) | 15 px | Semibold |
 | Metadata | 13 px | Regular, muted |
 | Procedure title input | 18 px | Semibold |
 
 ### Spacing
 
-4 px base unit. Section padding 20 px. Field vertical gap 16 px. Input height 40 px, horizontal padding 12 px, corner radius 4 px.
+4 px base unit. Section padding 20 px. Field vertical gap 16 px. Input height 34 px, horizontal padding 12 px, corner radius 4 px.
 
 ### Focus
 

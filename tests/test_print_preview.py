@@ -15,7 +15,7 @@ def test_print_preview_dialog_renders_a_real_pdf(db_conn, tmp_path, qapp):
         Summary(patient_name="W.D. Kusuma Wijerathna", bht_number="10178", ward="45", created_by=doctor.id, procedure_title="thyroidectomy"),
     )
 
-    dialog = PrintPreviewDialog(db_conn, created.id, tmp_path)
+    dialog = PrintPreviewDialog(db_conn, created.id, tmp_path, doctor.id)
     dialog.show()
     qapp.processEvents()
 
@@ -36,10 +36,10 @@ def test_print_preview_dialog_renders_a_real_pdf(db_conn, tmp_path, qapp):
 
 def test_editor_print_button_opens_a_real_preview_with_current_data(db_conn, tmp_path, qapp, monkeypatch):
     doctors_db.seed_if_empty(db_conn)
-    doctor = doctors_db.list_active(db_conn)[0]
+    creator, current = doctors_db.list_active(db_conn)[:2]
     created = summaries.create(
         db_conn,
-        Summary(patient_name="W.D. Kusuma Wijerathna", bht_number="10178", ward="45", created_by=doctor.id, procedure_title="thyroidectomy"),
+        Summary(patient_name="W.D. Kusuma Wijerathna", bht_number="10178", ward="45", created_by=creator.id, procedure_title="thyroidectomy"),
     )
 
     from app.ui.editor import Editor
@@ -60,6 +60,9 @@ def test_editor_print_button_opens_a_real_preview_with_current_data(db_conn, tmp
     monkeypatch.setattr(PrintPreviewDialog, "exec", _fake_exec)
 
     controller = EditorController(db_conn)
+    # A DIFFERENT doctor than the record's creator is currently selected —
+    # the printed signature must follow this one, not created_by (docs/decisions.md).
+    controller.current_doctor_id = current.id
     editor = Editor(controller)
     editor.show()
     qapp.processEvents()
@@ -77,6 +80,8 @@ def test_editor_print_button_opens_a_real_preview_with_current_data(db_conn, tmp
     opened_previews = [w for w in qapp.topLevelWidgets() if isinstance(w, PrintPreviewDialog)]
     assert len(opened_previews) >= 1
     assert b"Wijerathna" in captured_pdf_bytes.get("bytes", b"")
+    assert current.name.encode() in captured_pdf_bytes["bytes"]
+    assert creator.name.encode() not in captured_pdf_bytes["bytes"]
     for w in opened_previews:
         w.close()
 

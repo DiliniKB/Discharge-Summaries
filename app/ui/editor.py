@@ -164,7 +164,9 @@ class Editor(QWidget):
             return
         self.controller.flush()  # printed content must match what's about to be saved, not stale field values
         with tempfile.TemporaryDirectory() as tmp_dir:
-            dialog = PrintPreviewDialog(self.controller.conn, self.controller.summary_id, tmp_dir, self)
+            dialog = PrintPreviewDialog(
+                self.controller.conn, self.controller.summary_id, tmp_dir, self.controller.current_doctor_id, self
+            )
             dialog.exec()
             # tmp_dir (and the rendered PDF in it) is cleaned up here, once
             # the modal closes — CLAUDE.md: temp file, released after printing.

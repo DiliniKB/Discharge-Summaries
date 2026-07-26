@@ -18,9 +18,10 @@ class _FakeMainWindow:
     """Stand-in for MainWindow in tests that don't need a full window —
     just records what the Edit action would have done."""
 
-    def __init__(self):
+    def __init__(self, selected_doctor=None):
         self.loaded_summary_id = None
         self.selected_summary_id = None
+        self.selected_doctor = selected_doctor
         self.editor = self
         self.patient_list = self
 
@@ -206,7 +207,7 @@ def test_view_panel_resets_to_placeholder_on_a_fresh_search(db_conn, qapp):
 
 
 def test_print_button_launches_print_preview_dialog(db_conn, qapp, monkeypatch):
-    first, _second, _doc_a, _doc_b = _seed_two(db_conn)
+    first, _second, doc_a, doc_b = _seed_two(db_conn)
 
     captured = {}
 
@@ -216,12 +217,17 @@ def test_print_button_launches_print_preview_dialog(db_conn, qapp, monkeypatch):
 
     monkeypatch.setattr(PrintPreviewDialog, "exec", _fake_exec)
 
-    dialog = AdvancedSearchDialog(db_conn, _FakeMainWindow())
+    # first.id was created_by doc_a, but the header has doc_b selected —
+    # the printed signature should follow the CURRENTLY selected doctor,
+    # not whoever created the record (docs/decisions.md).
+    dialog = AdvancedSearchDialog(db_conn, _FakeMainWindow(selected_doctor=doc_b))
     dialog.show()
     qapp.processEvents()
 
     dialog._on_print(first.id)
     assert b"Wijerathna" in captured.get("bytes", b"")
+    assert doc_b.name.encode() in captured["bytes"]
+    assert doc_a.name.encode() not in captured["bytes"]
 
 
 def test_edit_button_loads_the_summary_selects_it_and_closes_the_dialog(db_conn, qapp):
