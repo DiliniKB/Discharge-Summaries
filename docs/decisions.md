@@ -220,6 +220,42 @@ No `QThread`/async infrastructure exists anywhere in this codebase, and CLAUDE.m
 
 ---
 
+## Patient Name and Doctor filter live; Keyword and date ranges don't
+
+**Decision:** `patient_name_input` debounces 150ms (same debounce the old inline patient-list search used); `doctor_picker` re-queries immediately on selection (already a discrete, deliberate action — same reasoning as Sex/Blood Group saving immediately elsewhere). Keyword and the four date fields get no signal wiring at all — only clicking Search (or Clear, which calls the same method) applies those.
+
+The split follows directly from what each filter actually costs: name/BHT hits two indexed columns (`idx_summaries_name`/`idx_summaries_bht`), cheap enough to re-run on every keystroke. Keyword is a broad `OR`-joined `LIKE` scan across eleven unindexed clinical-text columns, and the date ranges wrap `created_at`/`updated_at` in `date(...)`, which defeats any index — both are the "accepted unindexed scan, but only as an explicit action" tradeoff already documented above. Firing either on every keystroke would turn an accepted occasional cost into a per-character one.
+
+**Clearing filters blocks signals during the reset**, not just at the end. `patient_name_input.clear()`/`doctor_picker.setCurrentIndex(0)` each fire their own live-search wiring — without blocking, `_clear_filters()` would trigger two redundant searches back to back, and leave the name debounce timer armed to fire a *third*, stray one later (the same class of bug this codebase has hit twice before — see `tests/test_editor.py`'s and `EditorController.clear()`'s history).
+
+---
+
+## Full View has its own visual design, not a bigger copy of the quick-view panel
+
+**Decision (superseded once, see below):** the rendering logic that used to live directly in `AdvancedSearchDialog` (`_render_view_panel`/`_add_view_field`/`_add_view_section_header`) moved to a standalone function, `populate_summary_view()` in `app/ui/widgets/summary_view.py`, so the inline quick-view panel and the first version of `SummaryFullViewDialog` shared one implementation.
+
+That held only as long as Full View was literally "the same thing, bigger." Once the ask became "more catchy, highlight important stuff, organized," the two views genuinely diverged in purpose — quick-view stays a flat, compact, instant glance for a narrow sidebar; Full View is now a dedicated detail screen with its own layout: a tinted hero header, bordered card sections (mirroring the editor's own section styling), Admission's short fields laid out side by side instead of stacked, and a red allergy alert box that's deliberately the loudest thing on the page — allergy status is the one field on a discharge summary that's genuinely safety-critical to not miss, everything else earns equal visual weight. `SummaryFullViewDialog` now builds this directly rather than calling `populate_summary_view()`; `app/ui/widgets/summary_view.py` still backs the quick-view panel alone. Two real, differently-purposed views are allowed to look different — the earlier "share everything" decision was right for what Full View was at the time, not a rule to preserve past the point it stopped fitting.
+
+**New tokens added, not one-off colors inline:** `theme.DANGER_TINT` pairs with the existing `DANGER` token the same way `PRIMARY_TINT` already pairs with `PRIMARY` — the allergy alert's background follows the established tinting pattern rather than introducing an unrelated color.
+
+---
+
+## Action buttons get an explicit fixed height, not their natural QSS sizeHint
+
+**Decision:** `Full View`/`Print`/`Edit` in the Advanced Search results table are `setFixedHeight(26)`.
+
+Real bug, confirmed by screenshot: `theme.INPUT_HEIGHT_PX` (used for the table's row height) dropped from 40 to 34 in the form-density change, but nothing re-checked whether the action buttons' natural rendered height still fit inside that — it didn't, and the button text was vertically clipped top and bottom. An explicit height that's verified to fit is more robust than relying on a QSS sizeHint that depends on tokens changing elsewhere for unrelated reasons.
+
+---
+
+## Print signature — Save button copies, doesn't re-render
+
+**Decision:** Print Preview's new Save button copies the already-rendered `pdf_path` to a chosen location via `shutil.copy2`; it doesn't call `render_summary()` again, and it doesn't `accept()`/`reject()` the dialog.
+
+The PDF is already sitting on disk the moment the dialog opens (CLAUDE.md: "generate PDFs to a temp file") — there's nothing to regenerate. Not closing the dialog on Save matters because Save and Print aren't mutually exclusive: a doctor might save a copy and then still print, or save without printing at all (e.g. to email a colleague later). Print's own `accept()` on success stays as-is — printing is the terminal action that closes the modal; saving a copy isn't.
+
+---
+
 ## Paginated list queries
 
 **Decision:** `LIMIT 50` on the list pane, full record loaded only on selection.
@@ -249,6 +285,18 @@ With a few hundred summaries, loading everything would work fine today and degra
 **View panel leads with identity, hides blanks, and shows investigation values.** First pass just dumped every field in a flat list, including blank ones shown as "—" — accurate but not how a doctor actually scans a record. Reworked to: an identity line up top (name, age/sex, BHT, ward) so "is this the right patient?" is answered in one glance, not by reading a field labelled "Patient Name" partway down a list; doctor attribution (created/last edited by, with timestamps) since this dialog exists specifically to search across doctors; blank fields omitted entirely rather than shown as empty, reusing the same "omit if nothing to show" rule `app/printing/layout.py` already applies to the printed card (`has_clinical_history`, `format_investigations`, `DETAIL_FIELDS`/`CLINICAL_HISTORY_FIELDS`/`TAIL_FIELDS`) rather than re-deriving it; and investigation values shown inline, which the first pass omitted entirely — a real gap, since lab results are exactly what a doctor scanning a record wants to see.
 
 **Filter rows all use the same layout pattern; Search/Clear attach to the top row.** An earlier pass fixed cramped date-field spacing but left the panel feeling disorganized: the identity and keyword rows stretched edge-to-edge while the date row stayed half-width, and Search/Clear sat stranded on their own line below a mostly-empty row. Every row now uses the same `QHBoxLayout` + trailing `addStretch()` pattern for consistency, and the buttons moved onto the top (widest) row instead of floating below — a small `_button_row_aligned_with_inputs()` helper gives them a blank spacer label matching `LabeledField`'s own label-then-input structure, so they sit level with the inputs beside them rather than floating higher.
+
+---
+
+## Abnormal lab flagging, date-order warning, computed column widths
+
+**Decision:** three follow-ups from a "how could this improve, mathematically" review. All three warn, never block — same precedent as duplicate BHT.
+
+**Abnormal lab styling (`app/util/lab_ranges.py`, `app/ui/sections/investigations.py`).** `NORMAL_RANGES` holds a general adult reference range per standard analyte; `is_abnormal(label, value_text)` returns `True` only when the value parses as a plain float and falls outside that range — non-numeric lab text ("<0.5", "Not done") and unknown labels are never flagged, for the same reason `investigations.value` is TEXT rather than REAL. An out-of-range field gets a red border/tint (`QLineEdit[abnormal="true"]` in `app/theme.py`) on blur and again when a saved record is reopened. **These are general adult ranges, not a diagnostic tool** — a prompt to double-check, not a claim of clinical precision. Hb in particular is genuinely sex-dependent in practice; one unisex range here is a deliberate, disclosed simplification. Scoped to the editor's `InvestigationsSection` only — Advanced Search's view panel joins investigations into one string (`format_investigations`) that doesn't support per-token styling without a bigger rework, and that panel is a quick glance before Edit, not where values get entered.
+
+**Date-order warning (`app/util/validators.py`, `app/ui/sections/patient.py`).** `validate_date_order(admission, surgery, discharge)` compares the three ISO date strings as plain text (no parsing needed) and returns a warning for each out-of-order pair. A pair is only checked when both sides are filled — a blank date is never itself a warning. `PatientSection` shows the joined warning text in a hidden-by-default label below the dates row, on every date edit and on `populate()`. This is the `app/util/validators.py` module CLAUDE.md's layout named from the very start but never built.
+
+**Computed Advanced Search column widths (`app/ui/dialogs/advanced_search.py`).** The old `_COLUMN_WIDTHS` dict was hand-tuned by screenshot three separate times this project (clipped Actions buttons twice, a truncated header once). `_compute_column_widths(table)` replaces it, deriving BHT/Ward/Discharge Date/Created/Modified/Actions from real `QFontMetrics` against the actual content each column can hold — realistic-with-headroom digit samples for BHT/Ward, the widest string the fixed date/timestamp format can ever produce, and the three Actions button labels plus the QSS's own known padding/border for Actions. A font or DPI change on the target laptop can no longer silently reintroduce the clipping. **Doctor stays a fixed, documented judgment call** (90px) — display names are genuinely unbounded text, so there's no "widest sample" to compute from; truncation there is expected and acceptable.
 
 ---
 

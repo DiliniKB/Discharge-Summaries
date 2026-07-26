@@ -13,14 +13,19 @@ Esc closes — standard QDialog behavior, no extra code needed for that
 half of docs/ui-spec.md §7's "Esc: Close modal."
 """
 
+import re
+import shutil
+
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPdfWidgets import QPdfView
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QDialog, QFileDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from app import theme
 from app.db import doctors as doctors_db, summaries
 from app.printing import layout as print_layout
 from app.printing.printer import PrintUnsupportedError, print_pdf
+
+_UNSAFE_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|]')
 
 
 class PrintPreviewDialog(QDialog):
@@ -30,6 +35,7 @@ class PrintPreviewDialog(QDialog):
         self.resize(700, 900)
 
         summary = summaries.get(conn, summary_id)
+        self.summary = summary
         investigations = summaries.list_investigations(conn, summary_id)
         # The signing officer is whoever is CURRENTLY selected in the
         # header when printing, not summary.created_by — a different
@@ -61,6 +67,12 @@ class PrintPreviewDialog(QDialog):
         self.status_label.setObjectName("Muted")
         button_bar.addWidget(self.status_label, stretch=1)
 
+        self.save_button = QPushButton("Save")
+        self.save_button.setObjectName("Secondary")
+        self.save_button.setMinimumHeight(theme.INPUT_HEIGHT_PX)
+        self.save_button.clicked.connect(self._on_save)
+        button_bar.addWidget(self.save_button)
+
         cancel_button = QPushButton("Cancel")
         cancel_button.setObjectName("Secondary")
         cancel_button.setMinimumHeight(theme.INPUT_HEIGHT_PX)
@@ -81,3 +93,17 @@ class PrintPreviewDialog(QDialog):
             self.accept()
         except PrintUnsupportedError:
             self.status_label.setText("No default printer, or printing isn't available on this system.")
+
+    def _on_save(self):
+        # Copies the already-rendered PDF, doesn't re-render — doesn't
+        # accept()/reject() either, unlike Print, since a doctor might
+        # want to save and then still print, or just save without
+        # printing at all.
+        default_name = _UNSAFE_FILENAME_CHARS.sub(
+            "_", f"{self.summary.patient_name or 'summary'}_{self.summary.bht_number or ''}"
+        ).strip("_") + ".pdf"
+        chosen_path, _filter = QFileDialog.getSaveFileName(self, "Save PDF", default_name, "PDF Files (*.pdf)")
+        if not chosen_path:
+            return
+        shutil.copy2(self.pdf_path, chosen_path)
+        self.status_label.setText("Saved.")

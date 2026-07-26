@@ -7,6 +7,14 @@ from PySide6.QtTest import QTest
 from app.ui.sections.patient import PatientSection
 
 
+class _StubController:
+    """bind_controller() only needs set_field to exist — the date-warning
+    tests care about the label, not persistence."""
+
+    def set_field(self, *args, **kwargs):
+        pass
+
+
 def test_section_title_and_default_state():
     sec = PatientSection()
     sec.show()
@@ -82,3 +90,57 @@ def test_tab_order_follows_the_paper_form_top_to_bottom(qapp):
 
     expected = ["name", "age", "sex", "bht", "ward", "telephone", "blood_group", "admission", "surgery", "discharge"]
     assert tab_order == expected, f"got: {' -> '.join(tab_order)}"
+
+
+def _set_date(field, iso_date):
+    # set_iso() alone doesn't fire value_changed (see datefield.py) — real
+    # calendar-pick/blur behaviour emits it explicitly, so tests do the same.
+    field.set_iso(iso_date)
+    field.value_changed.emit(iso_date)
+
+
+def test_date_warning_hidden_by_default():
+    sec = PatientSection()
+    sec.show()
+    assert sec._date_warning_label.isVisible() is False
+
+
+def test_surgery_before_admission_shows_warning():
+    sec = PatientSection()
+    sec.show()
+    sec.bind_controller(_StubController())
+    _set_date(sec.admission_date, "2026-01-10")
+    _set_date(sec.surgery_date, "2026-01-05")
+
+    assert sec._date_warning_label.isVisible() is True
+    assert "Surgery date is before Admission date." in sec._date_warning_label.text()
+
+
+def test_fixing_the_date_hides_the_warning_again():
+    sec = PatientSection()
+    sec.show()
+    sec.bind_controller(_StubController())
+    _set_date(sec.admission_date, "2026-01-10")
+    _set_date(sec.surgery_date, "2026-01-05")
+    assert sec._date_warning_label.isVisible() is True
+
+    _set_date(sec.surgery_date, "2026-01-12")
+    assert sec._date_warning_label.isVisible() is False
+
+
+def test_populate_with_inconsistent_saved_dates_shows_warning_immediately():
+    from app.models import Summary
+
+    sec = PatientSection()
+    sec.show()
+    summary = Summary(
+        patient_name="Test Patient",
+        bht_number="1",
+        date_admission="2026-01-15",
+        date_surgery="2026-01-12",
+        date_discharge="2026-01-10",
+    )
+
+    sec.populate(summary)
+
+    assert sec._date_warning_label.isVisible() is True

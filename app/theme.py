@@ -16,6 +16,7 @@ TEXT_MUTED = "#6B7280"
 PRIMARY = "#1D6FD0"
 PRIMARY_TINT = "#E8F1FC"
 DANGER = "#C0392B"
+DANGER_TINT = "#FBEAEA"  # pairs with DANGER the same way PRIMARY_TINT pairs with PRIMARY — used once, for the Full View allergy alert
 SUCCESS = "#2E7D4F"
 
 # --- Type -------------------------------------------------------------------
@@ -109,6 +110,30 @@ def build_stylesheet():
         font-weight: 600;
     }}
 
+    /* Full View dialog only (app/ui/dialogs/summary_full_view.py) — the
+       one place in the app that gets a "hero" treatment, since it's a
+       dedicated detail view, not a form to fill in. */
+    QFrame#HeroCard {{
+        background: {PRIMARY_TINT};
+        border-radius: {CORNER_RADIUS * 2}px;
+        border: none;
+    }}
+    QLabel#HeroName {{
+        color: {TEXT};
+        font-size: 20px;
+        font-weight: 700;
+    }}
+    QFrame#AlertCard {{
+        background: {DANGER_TINT};
+        border: 1px solid {DANGER};
+        border-radius: {CORNER_RADIUS}px;
+    }}
+    QLabel#AlertText {{
+        color: {DANGER};
+        font-size: {SIZE_INPUT}px;
+        font-weight: 600;
+    }}
+
     QLineEdit, QComboBox {{
         background: {SURFACE};
         color: {TEXT};
@@ -121,6 +146,14 @@ def build_stylesheet():
     }}
     QLineEdit:focus, QComboBox:focus {{
         border: 2px solid {PRIMARY};
+    }}
+    /* Investigations section only (app/ui/sections/investigations.py) —
+       a value outside the general adult reference range (app/util/lab_ranges.py).
+       A prompt to double-check, not a block on saving — the field still
+       accepts and persists whatever was typed. */
+    QLineEdit[abnormal="true"] {{
+        border: 2px solid {DANGER};
+        background: {DANGER_TINT};
     }}
     /* Narrow numeric boxes (DateField) — the standard 12px input padding
        above leaves almost no room for 2-4 digits at this width. */

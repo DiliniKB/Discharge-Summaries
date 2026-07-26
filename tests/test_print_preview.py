@@ -1,5 +1,7 @@
 """Print Preview dialog + Editor._on_print() wiring."""
 
+from PySide6.QtWidgets import QFileDialog
+
 from app.db import doctors as doctors_db
 from app.db import summaries
 from app.models import Summary
@@ -31,6 +33,52 @@ def test_print_preview_dialog_renders_a_real_pdf(db_conn, tmp_path, qapp):
     qapp.processEvents()
     assert "printer" in dialog.status_label.text().lower()
 
+    dialog.close()
+
+
+def test_save_button_copies_the_pdf_and_stays_open(db_conn, tmp_path, qapp, monkeypatch):
+    doctors_db.seed_if_empty(db_conn)
+    doctor = doctors_db.list_active(db_conn)[0]
+    created = summaries.create(
+        db_conn,
+        Summary(patient_name="W.D. Kusuma Wijerathna", bht_number="10178", ward="45", created_by=doctor.id),
+    )
+
+    dialog = PrintPreviewDialog(db_conn, created.id, tmp_path, doctor.id)
+    dialog.show()
+    qapp.processEvents()
+
+    save_dest = tmp_path / "saved" / "discharge.pdf"
+    save_dest.parent.mkdir()
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(save_dest), "")))
+
+    dialog._on_save()
+
+    assert save_dest.exists()
+    assert save_dest.read_bytes() == dialog.pdf_path.read_bytes()
+    assert dialog.status_label.text() == "Saved."
+    assert dialog.isVisible() is True, "Save doesn't close the dialog, unlike Print"
+    assert dialog.result() == 0, "Save doesn't accept()/reject() either"
+
+    dialog.close()
+
+
+def test_save_button_cancelled_does_nothing(db_conn, tmp_path, qapp, monkeypatch):
+    doctors_db.seed_if_empty(db_conn)
+    doctor = doctors_db.list_active(db_conn)[0]
+    created = summaries.create(
+        db_conn,
+        Summary(patient_name="W.D. Kusuma Wijerathna", bht_number="10178", ward="45", created_by=doctor.id),
+    )
+
+    dialog = PrintPreviewDialog(db_conn, created.id, tmp_path, doctor.id)
+    dialog.show()
+    qapp.processEvents()
+
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: ("", "")))
+    dialog._on_save()
+
+    assert dialog.status_label.text() == ""
     dialog.close()
 
 

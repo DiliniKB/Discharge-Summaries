@@ -4,14 +4,22 @@ per-row Print/Edit actions, and a read-only view panel that updates on
 row selection (no separate View button)."""
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFontMetrics
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QDialog
 
 from app.db import doctors as doctors_db
 from app.db import summaries
 from app.models import Summary
 
-from app.ui.dialogs.advanced_search import AdvancedSearchDialog
+from app.ui.dialogs.advanced_search import (
+    NAME_DEBOUNCE_MS,
+    AdvancedSearchDialog,
+    _ACTION_BUTTON_LABELS,
+    _compute_column_widths,
+)
 from app.ui.dialogs.print_preview import PrintPreviewDialog
+from app.ui.dialogs.summary_full_view import SummaryFullViewDialog
 
 
 class _FakeMainWindow:
@@ -87,12 +95,20 @@ def test_patient_name_filter_narrows_by_name_or_bht(db_conn, qapp):
     dialog = AdvancedSearchDialog(db_conn, _FakeMainWindow())
     dialog.show()
 
+    # setText() arms the 150ms debounce QTimer via textChanged. Bypassing
+    # it with an immediate _run_search() for a deterministic test — but
+    # the armed timer must be stopped too, or it fires for real later
+    # (possibly during a LATER test, once db_conn's teardown has already
+    # closed this connection — the exact bug this pattern caught before,
+    # see tests/test_patient_list.py's history).
     dialog.patient_name_input.setText("wijerathna")
+    dialog._name_debounce.stop()
     dialog._run_search()
     assert dialog.table.rowCount() == 1
     assert dialog.table.item(0, 0).text() == "W.D. Kusuma Wijerathna"
 
     dialog.patient_name_input.setText("10202")
+    dialog._name_debounce.stop()
     dialog._run_search()
     assert dialog.table.rowCount() == 1
     assert dialog.table.item(0, 0).text() == "A.B. Perera"
@@ -103,11 +119,66 @@ def test_doctor_filter_narrows_the_results(db_conn, qapp):
     dialog = AdvancedSearchDialog(db_conn, _FakeMainWindow())
     dialog.show()
 
+    # Doctor filters live — no Search click needed (docs/decisions.md).
     doc_a_index = next(i for i, d_id in enumerate(dialog._doctor_ids_by_index) if d_id == doc_a.id)
     dialog.doctor_picker.setCurrentIndex(doc_a_index)
-    dialog._run_search()
     assert dialog.table.rowCount() == 1
     assert dialog.table.item(0, 0).text() == "W.D. Kusuma Wijerathna"
+
+
+def test_patient_name_debounce_fires_search_without_clicking(db_conn, qapp):
+    _seed_two(db_conn)
+    dialog = AdvancedSearchDialog(db_conn, _FakeMainWindow())
+    dialog.show()
+    assert dialog.table.rowCount() == 2
+
+    dialog.patient_name_input.setText("wijerathna")  # never calls _run_search() or clicks Search
+    QTest.qWait(NAME_DEBOUNCE_MS + 200)
+    qapp.processEvents()
+
+    assert dialog.table.rowCount() == 1
+    assert dialog.table.item(0, 0).text() == "W.D. Kusuma Wijerathna"
+
+
+def test_keyword_and_date_filters_do_not_auto_search(db_conn, qapp):
+    summaries.create(db_conn, Summary(
+        patient_name="Case One", bht_number="1", findings="unusual eosinophilic pattern",
+    ))
+    summaries.create(db_conn, Summary(patient_name="Case Two", bht_number="2"))
+    dialog = AdvancedSearchDialog(db_conn, _FakeMainWindow())
+    dialog.show()
+    assert dialog.table.rowCount() == 2
+
+    dialog.keyword_input.setText("eosinophilic")
+    qapp.processEvents()
+    assert dialog.table.rowCount() == 2, "keyword typing alone must not narrow the results"
+
+    dialog.created_from.set_iso("2020-01-01")
+    qapp.processEvents()
+    assert dialog.table.rowCount() == 2, "setting a date alone must not narrow the results"
+
+    dialog.search_button.click()
+    assert dialog.table.rowCount() == 1, "clicking Search finally applies the pending keyword filter"
+
+
+def test_full_view_button_opens_summary_full_view_dialog(db_conn, qapp, monkeypatch):
+    first, _second, _doc_a, _doc_b = _seed_two(db_conn)
+
+    opened = {}
+
+    def _fake_exec(self):
+        opened["dialog"] = self
+        self.show()
+
+    monkeypatch.setattr(SummaryFullViewDialog, "exec", _fake_exec)
+
+    dialog = AdvancedSearchDialog(db_conn, _FakeMainWindow())
+    dialog.show()
+    qapp.processEvents()
+
+    dialog._on_full_view(first.id)
+    assert "dialog" in opened
+    assert opened["dialog"].windowTitle() == "W.D. Kusuma Wijerathna"
 
 
 def test_clear_filters_restores_the_full_list(db_conn, qapp):
@@ -241,3 +312,35 @@ def test_edit_button_loads_the_summary_selects_it_and_closes_the_dialog(db_conn,
     assert fake_main_window.loaded_summary_id == first.id
     assert fake_main_window.selected_summary_id == first.id
     assert dialog.result() == QDialog.Accepted
+
+
+def test_computed_column_widths_fit_the_real_actions_buttons(db_conn, qapp):
+    # Independently reconstruct the expected Actions width from real font
+    # metrics + the QSS's own known padding/border (app/theme.py) — this
+    # verifies the reasoning behind _compute_column_widths, not a copy of
+    # the same magic number it produces.
+    from app import theme
+
+    dialog = AdvancedSearchDialog(db_conn, _FakeMainWindow())
+    dialog.show()
+    qapp.processEvents()
+
+    metrics = QFontMetrics(dialog.table.font())
+    expected_actions_width = sum(
+        metrics.horizontalAdvance(label) + 2 * (1 + theme.INPUT_PADDING_X) for label in _ACTION_BUTTON_LABELS
+    )
+    expected_actions_width += 2 * theme.SPACING_UNIT + 2 * 4
+
+    widths = _compute_column_widths(dialog.table)
+    assert widths[7] == expected_actions_width
+    assert widths[7] >= expected_actions_width
+
+
+def test_no_horizontal_scrollbar_with_real_seeded_data(db_conn, qapp):
+    _seed_two(db_conn)
+    dialog = AdvancedSearchDialog(db_conn, _FakeMainWindow())
+    dialog.resize(1200, 600)
+    dialog.show()
+    qapp.processEvents()
+
+    assert dialog.table.horizontalScrollBar().isVisible() is False

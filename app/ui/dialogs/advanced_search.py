@@ -1,18 +1,20 @@
 """Advanced Search dialog — replaces the patient list's old inline search
-box entirely (docs/decisions.md). Filters combine (patient name, broad
-keyword, doctor, created/modified date ranges); results are a sortable
-table. Selecting a row updates the read-only view panel automatically —
-no separate View button (docs/decisions.md); Print/Edit remain explicit
-per-row actions since those are real, consequential operations.
+box entirely (docs/decisions.md). Patient Name and Doctor filter live (no
+Search click needed — docs/decisions.md); Keyword and the date ranges
+only apply when Search is clicked, since a full clinical-text scan or an
+unindexed date-range scan isn't something to fire on every keystroke.
 
-The view panel is a built-from-scratch read-only field layout, not a
-re-rendered PDF (docs/decisions.md) — instant on selection, no per-click
-temp-file render cost.
+Selecting a row updates the read-only quick-view panel automatically —
+no separate View button (docs/decisions.md). A "Full View" button opens
+the same content bigger, in its own dialog (app/ui/dialogs/summary_full_view.py).
+Print/Edit remain explicit per-row actions since those are real,
+consequential operations.
 """
 
 import tempfile
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -34,17 +36,74 @@ from app.db import doctors as doctors_db
 from app.db import summaries
 from app.printing import layout as print_layout
 from app.ui.dialogs.print_preview import PrintPreviewDialog
+from app.ui.dialogs.summary_full_view import SummaryFullViewDialog
 from app.ui.widgets.datefield import DateField
 from app.ui.widgets.labeled import LabeledField
 from app.ui.widgets.scrollframe import ScrollFrame
+from app.ui.widgets.summary_view import populate_summary_view
 
 ALL_DOCTORS_LABEL = "All doctors"
+NAME_DEBOUNCE_MS = 150
+ACTION_BUTTON_HEIGHT = 26  # explicit, not the natural QSS sizeHint — see docs/decisions.md
 
 _COLUMNS = ["Patient Name", "BHT", "Ward", "Doctor", "Discharge Date", "Created", "Modified", "Actions"]
+
 # Column 0 (Patient Name) stretches; every other column needs an explicit
 # width or Qt's ~100px default truncates doctor names/timestamps and
-# squeezes the three Actions buttons into unreadable slivers.
-_COLUMN_WIDTHS = {1: 65, 2: 60, 3: 145, 4: 110, 5: 110, 6: 110, 7: 150}
+# squeezes the three Actions buttons (Full View/Print/Edit) into
+# unreadable slivers.
+#
+# Widths below three separate hand-tuned-by-screenshot passes this
+# project went through (clipped Actions buttons twice, a truncated
+# header once) — computed instead, from real font metrics against the
+# actual content each column holds, so a font/DPI change on the target
+# laptop can't silently reintroduce the same clipping.
+COLUMN_WIDTH_PADDING = 24  # cell margin + a little breathing room, same for every computed column
+
+# BHT/Ward are plain digit strings (see docs/schema.md; test fixtures use
+# 5-digit BHTs like "10178", 2-digit wards like "45") — these samples are
+# deliberately a digit longer than typical real data as headroom, not a guess.
+_BHT_SAMPLE = "999999"
+_WARD_SAMPLE = "999"
+# Fixed DD/MM/YYYY / DD/MM/YYYY HH:MM formats (app/printing/layout.format_date,
+# _format_timestamp above) are fully reproducible from a literal sample —
+# not a guess either, just the widest string that format can ever produce.
+_DISCHARGE_DATE_SAMPLE = "31/12/2026"
+_TIMESTAMP_SAMPLE = "31/12/2026 23:59"
+_ACTION_BUTTON_LABELS = ("Full View", "Print", "Edit")
+# QPushButton#SecondaryCompact / #PrimaryCompact (app/theme.py): 1px border
+# each side, INPUT_PADDING_X each side.
+_ACTION_BUTTON_HORIZONTAL_CHROME = 2 * (1 + theme.INPUT_PADDING_X)
+
+
+def _compute_column_widths(table):
+    """Deterministic widths for every fixed (non-stretching, non-Doctor)
+    column, from the real font the table renders with — not a hardcoded
+    pixel guess. Doctor stays a separate, documented judgment call
+    (below): names are genuinely unbounded, so no sample is "the" widest one.
+    """
+    cell_metrics = QFontMetrics(table.font())
+    header_metrics = QFontMetrics(table.horizontalHeader().font())
+
+    def _sized(sample, header_text):
+        return max(cell_metrics.horizontalAdvance(sample), header_metrics.horizontalAdvance(header_text)) + COLUMN_WIDTH_PADDING
+
+    actions_width = sum(cell_metrics.horizontalAdvance(label) + _ACTION_BUTTON_HORIZONTAL_CHROME for label in _ACTION_BUTTON_LABELS)
+    actions_width += 2 * theme.SPACING_UNIT  # row_layout.setSpacing() between the three buttons
+    actions_width += 2 * 4  # _build_actions_cell's own left/right QHBoxLayout margins
+
+    return {
+        1: _sized(_BHT_SAMPLE, "BHT"),
+        2: _sized(_WARD_SAMPLE, "Ward"),
+        # Doctor: unbounded free text (doctor display names), not
+        # computable from a sample the way every other column here is —
+        # truncation is expected and acceptable, this is a judgment call.
+        3: 90,
+        4: _sized(_DISCHARGE_DATE_SAMPLE, "Discharge Date"),
+        5: _sized(_TIMESTAMP_SAMPLE, "Created"),
+        6: _sized(_TIMESTAMP_SAMPLE, "Modified"),
+        7: actions_width,
+    }
 
 def _format_timestamp(iso_timestamp):
     """Full ISO datetime -> 'DD/MM/YYYY HH:MM'. Blank -> ''."""
@@ -65,6 +124,10 @@ class AdvancedSearchDialog(QDialog):
         self.resize(1200, 700)
 
         self._doctors_by_id = {d.id: d for d in doctors_db.list_all(self._conn)}
+
+        self._name_debounce = QTimer(self)
+        self._name_debounce.setSingleShot(True)
+        self._name_debounce.timeout.connect(self._run_search)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(
@@ -117,6 +180,10 @@ class AdvancedSearchDialog(QDialog):
         top_row.setSpacing(theme.FIELD_GAP)
         self.patient_name_input = QLineEdit()
         self.patient_name_input.setMinimumHeight(theme.INPUT_HEIGHT_PX)
+        # Live filtering, debounced — matches the old inline patient-list
+        # search's own debounce (docs/decisions.md). Keyword/dates below
+        # deliberately get no such wiring; only Search applies those.
+        self.patient_name_input.textChanged.connect(lambda _: self._name_debounce.start(NAME_DEBOUNCE_MS))
         top_row.addWidget(LabeledField("Patient Name / BHT", self.patient_name_input), stretch=1)
 
         self.doctor_picker = QComboBox()
@@ -127,6 +194,10 @@ class AdvancedSearchDialog(QDialog):
         for doctor in self._doctors_by_id.values():
             self.doctor_picker.addItem(doctor.display_name)
             self._doctor_ids_by_index.append(doctor.id)
+        # Connected after populating — addItem() itself fires
+        # currentIndexChanged once as the index moves from -1 to 0, which
+        # would otherwise fire a premature search.
+        self.doctor_picker.currentIndexChanged.connect(self._run_search)
         top_row.addWidget(LabeledField("Doctor", self.doctor_picker))
 
         self.search_button = QPushButton("Search")
@@ -199,8 +270,21 @@ class AdvancedSearchDialog(QDialog):
         return wrap
 
     def _clear_filters(self):
+        # Resetting patient_name_input/doctor_picker below fires their own
+        # live-search signals (textChanged arms the debounce timer;
+        # currentIndexChanged fires immediately) — blocked here so this
+        # method's own single _run_search() call at the end is the only
+        # one that actually runs, and no stray armed debounce timer is
+        # left behind to fire a redundant search later.
+        self._name_debounce.stop()
+        self.patient_name_input.blockSignals(True)
         self.patient_name_input.clear()
+        self.patient_name_input.blockSignals(False)
+
+        self.doctor_picker.blockSignals(True)
         self.doctor_picker.setCurrentIndex(0)
+        self.doctor_picker.blockSignals(False)
+
         self.keyword_input.clear()
         for field in (self.created_from, self.created_to, self.modified_from, self.modified_to):
             field.set_iso("")
@@ -225,7 +309,7 @@ class AdvancedSearchDialog(QDialog):
         # Fixed widths for every non-stretching column — left to Qt's
         # default (~100px), long doctor names/timestamps truncate and the
         # Actions buttons squeeze down to unreadable slivers.
-        for col, width in _COLUMN_WIDTHS.items():
+        for col, width in _compute_column_widths(self.table).items():
             self.table.setColumnWidth(col, width)
 
         self.table.itemSelectionChanged.connect(self._on_row_selected)
@@ -290,13 +374,25 @@ class AdvancedSearchDialog(QDialog):
         row_layout.setContentsMargins(4, 2, 4, 2)
         row_layout.setSpacing(theme.SPACING_UNIT)
 
+        # Explicit fixed height, not the buttons' natural QSS sizeHint —
+        # that's what actually fits them inside the table's row height
+        # (theme.INPUT_HEIGHT_PX, tightened for form density elsewhere)
+        # without the text getting vertically clipped (docs/decisions.md).
+        full_view_button = QPushButton("Full View")
+        full_view_button.setObjectName("SecondaryCompact")
+        full_view_button.setFixedHeight(ACTION_BUTTON_HEIGHT)
+        full_view_button.clicked.connect(lambda: self._on_full_view(summary_id))
+        row_layout.addWidget(full_view_button)
+
         print_button = QPushButton("Print")
         print_button.setObjectName("SecondaryCompact")
+        print_button.setFixedHeight(ACTION_BUTTON_HEIGHT)
         print_button.clicked.connect(lambda: self._on_print(summary_id))
         row_layout.addWidget(print_button)
 
         edit_button = QPushButton("Edit")
         edit_button.setObjectName("PrimaryCompact")
+        edit_button.setFixedHeight(ACTION_BUTTON_HEIGHT)
         edit_button.clicked.connect(lambda: self._on_edit(summary_id))
         row_layout.addWidget(edit_button)
 
@@ -323,97 +419,14 @@ class AdvancedSearchDialog(QDialog):
         if show_placeholder:
             self._view_scroll.add_widget(self._view_placeholder)
 
-    def _add_view_field(self, label, value):
-        """Omits the row entirely when blank — a doctor scanning a record
-        wants to see what's actually documented, not a wall of '—'s for
-        everything nobody filled in. Mirrors the same omission rule
-        app/printing/layout.py already applies to the printed card."""
-        if not value:
-            return
-        value_label = QLabel(str(value))
-        value_label.setWordWrap(True)
-        self._view_scroll.add_widget(LabeledField(label, value_label))
-
-    def _add_view_section_header(self, heading):
-        header = QLabel(heading)
-        header.setObjectName("SectionHeader")
-        self._view_scroll.add_widget(header)
-
     def _render_view_panel(self, summary, investigations):
         self._clear_view_panel()
-
-        # Identity header, styled like the editor's own breadcrumb — the
-        # first thing a doctor scanning search results needs is "is this
-        # the right patient?", not a field labelled "Patient Name" buried
-        # in a list.
-        name_label = QLabel(summary.patient_name or "(unnamed)")
-        name_label.setObjectName("PatientName")
-        name_label.setWordWrap(True)
-        self._view_scroll.add_widget(name_label)
-
-        age_sex = f"{summary.age}{(summary.sex or '')[:1]}" if summary.age else (summary.sex or "")
-        identity_bits = [b for b in [age_sex, f"BHT {summary.bht_number or '—'}"] if b]
-        if summary.ward:
-            identity_bits.append(f"Ward {summary.ward}")
-        identity_label = QLabel(" · ".join(identity_bits))
-        identity_label.setObjectName("Muted")
-        self._view_scroll.add_widget(identity_label)
-
-        # Who touched this record and when — directly relevant here since
-        # the whole dialog exists to search across doctors.
-        attribution_bits = []
-        creator = self._doctors_by_id.get(summary.created_by)
-        if creator:
-            attribution_bits.append(f"Created by {creator.name} · {_format_timestamp(summary.created_at)}")
-        last_editor = self._doctors_by_id.get(summary.last_edited_by)
-        if last_editor:
-            attribution_bits.append(f"Last edited by {last_editor.name} · {_format_timestamp(summary.updated_at)}")
-        if attribution_bits:
-            attribution_label = QLabel("   ·   ".join(attribution_bits))
-            attribution_label.setObjectName("Muted")
-            attribution_label.setWordWrap(True)
-            self._view_scroll.add_widget(attribution_label)
-
-        self._add_view_section_header("ADMISSION")
-        self._add_view_field("Telephone", summary.telephone)
-        self._add_view_field("Blood Group", summary.blood_group)
-        self._add_view_field("Admission Date", print_layout.format_date(summary.date_admission))
-        self._add_view_field("Surgery Date", print_layout.format_date(summary.date_surgery))
-        self._add_view_field("Discharge Date", print_layout.format_date(summary.date_discharge))
-
-        self._add_view_section_header("PROCEDURE")
-        if summary.procedure_title:
-            title_label = QLabel(summary.procedure_title.upper())
-            title_label.setObjectName("ProcedureTitle")
-            title_label.setWordWrap(True)
-            self._view_scroll.add_widget(title_label)
-        for label, attr, _preserve in print_layout.DETAIL_FIELDS:
-            self._add_view_field(label, getattr(summary, attr))
-
-        self._add_view_section_header("CLINICAL HISTORY")
-        if print_layout.has_clinical_history(summary):
-            for label, attr in print_layout.CLINICAL_HISTORY_FIELDS:
-                self._add_view_field(label, getattr(summary, attr))
-        else:
-            empty_label = QLabel("No clinical history recorded.")
-            empty_label.setObjectName("Muted")
-            self._view_scroll.add_widget(empty_label)
-
-        self._add_view_section_header("INVESTIGATIONS & MANAGEMENT")
-        investigations_text = print_layout.format_investigations(investigations)
-        if investigations_text or summary.management or summary.histology_report:
-            self._add_view_field("Investigations", investigations_text)
-            for label, attr, _preserve in print_layout.TAIL_FIELDS:
-                self._add_view_field(label, getattr(summary, attr))
-        else:
-            empty_label = QLabel("No investigations or management recorded.")
-            empty_label.setObjectName("Muted")
-            self._view_scroll.add_widget(empty_label)
+        populate_summary_view(self._view_scroll, summary, investigations, self._doctors_by_id)
 
     # --- Row actions ----------------------------------------------------
 
     def _on_row_selected(self):
-        """Clicking a row shows its full record in the view panel
+        """Clicking a row shows its full record in the quick-view panel
         directly — no separate View button (docs/decisions.md)."""
         row = self.table.currentRow()
         if row < 0:
@@ -427,6 +440,12 @@ class AdvancedSearchDialog(QDialog):
         summary = summaries.get(self._conn, summary_id)
         investigations = summaries.list_investigations(self._conn, summary_id)
         self._render_view_panel(summary, investigations)
+
+    def _on_full_view(self, summary_id):
+        summary = summaries.get(self._conn, summary_id)
+        investigations = summaries.list_investigations(self._conn, summary_id)
+        dialog = SummaryFullViewDialog(summary, investigations, self._doctors_by_id, self)
+        dialog.exec()
 
     def _on_print(self, summary_id):
         # Same "currently selected header doctor signs" rule as the

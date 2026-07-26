@@ -4,6 +4,17 @@ validator — docs/decisions.md), '+ Other' ad-hoc rows, auto-growing text areas
 from app.ui.sections.investigations import ANALYTES_ROW_1, ANALYTES_ROW_2, InvestigationsSection
 
 
+class _StubController:
+    """bind_controller() only needs set_field/set_investigation to exist —
+    the abnormal-styling tests care about the property, not persistence."""
+
+    def set_field(self, *args, **kwargs):
+        pass
+
+    def set_investigation(self, *args, **kwargs):
+        pass
+
+
 def test_section_title_and_seven_fixed_analytes():
     sec = InvestigationsSection()
     sec.show()
@@ -70,3 +81,57 @@ def test_management_and_histology_are_auto_growing():
 
     sec.management_input.setPlainText("T. Paracetamol 1g PO PRN")
     assert sec.management_input.toPlainText() == "T. Paracetamol 1g PO PRN"
+
+
+def test_out_of_range_value_flags_abnormal_on_blur():
+    # FBS normal range is 70-100 (app/util/lab_ranges.py) — 250 is well outside it.
+    sec = InvestigationsSection()
+    sec.show()
+    sec.bind_controller(_StubController())
+    fbs = sec.analyte_inputs["FBS"]
+
+    fbs.setText("250")
+    fbs.editingFinished.emit()
+    assert fbs.property("abnormal") is True
+
+
+def test_normal_value_clears_abnormal_flag():
+    sec = InvestigationsSection()
+    sec.show()
+    sec.bind_controller(_StubController())
+    fbs = sec.analyte_inputs["FBS"]
+
+    fbs.setText("250")
+    fbs.editingFinished.emit()
+    assert fbs.property("abnormal") is True
+
+    fbs.setText("86")
+    fbs.editingFinished.emit()
+    assert fbs.property("abnormal") is False
+
+
+def test_non_numeric_lab_result_never_flagged_abnormal():
+    # docs/decisions.md: "<0.5" / "Not done" are real lab results, not
+    # invalid input — there's nothing numeric to compare against a range.
+    sec = InvestigationsSection()
+    sec.show()
+    sec.bind_controller(_StubController())
+    scr = sec.analyte_inputs["SCr"]
+
+    scr.setText("<0.5")
+    scr.editingFinished.emit()
+    assert scr.property("abnormal") is False
+
+
+def test_populate_flags_a_saved_abnormal_value_immediately():
+    from app.models import Summary
+
+    sec = InvestigationsSection()
+    sec.show()
+    summary = Summary(patient_name="Test Patient", bht_number="1")
+    investigations_by_label = {"K": {"value": "6.8"}, "FBS": {"value": "86"}}
+
+    sec.populate(summary, investigations_by_label)
+
+    assert sec.analyte_inputs["K"].property("abnormal") is True
+    assert sec.analyte_inputs["FBS"].property("abnormal") is False

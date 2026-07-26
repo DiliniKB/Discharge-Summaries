@@ -12,19 +12,22 @@ a column width with Date of Admission — and a shared grid forces Qt to
 size each column by the widest demand across every row that touches it,
 which visibly distorts groups that have nothing to do with each other.
 
-Cross-field validation (e.g. surgery date between admission and discharge,
-§4.2) is deliberately not built here — that's app/util/validators.py's job
-per CLAUDE.md's planned layout, not something to bolt on per-section.
+Cross-field date-order validation (§4.2) lives in app/util/validators.py
+per CLAUDE.md's planned layout — this section only calls it and displays
+the result. Same as duplicate BHT and the abnormal-lab styling
+(app/ui/sections/investigations.py), it warns, never blocks: an unusual
+but correct date order must still be saveable immediately.
 """
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIntValidator
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLineEdit, QSizePolicy
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QLineEdit, QSizePolicy
 
 from app import theme
 from app.ui.widgets.collapsible import CollapsibleSection
 from app.ui.widgets.datefield import DateField
 from app.ui.widgets.labeled import LabeledField
+from app.util.validators import validate_date_order
 
 DEFAULT_WARD = "45"  # docs/schema.md: ward TEXT, "Defaults to 45"
 
@@ -112,6 +115,14 @@ class PatientSection(CollapsibleSection):
         dates_row.addStretch()
         self.body_layout.addLayout(dates_row)
 
+        # Hidden until _revalidate_dates() finds an out-of-order pair —
+        # never blocks saving, just prompts a second look (see module docstring).
+        self._date_warning_label = QLabel("")
+        self._date_warning_label.setObjectName("Danger")
+        self._date_warning_label.setWordWrap(True)
+        self._date_warning_label.setVisible(False)
+        self.body_layout.addWidget(self._date_warning_label)
+
     def bind_controller(self, controller):
         """Wires every field's blur to controller.set_field(). Called once
         by Editor after construction — see app/ui/editor_controller.py."""
@@ -125,6 +136,21 @@ class PatientSection(CollapsibleSection):
         self.admission_date.value_changed.connect(lambda iso: controller.set_field("date_admission", iso))
         self.surgery_date.value_changed.connect(lambda iso: controller.set_field("date_surgery", iso))
         self.discharge_date.value_changed.connect(lambda iso: controller.set_field("date_discharge", iso))
+        self.admission_date.value_changed.connect(self._revalidate_dates)
+        self.surgery_date.value_changed.connect(self._revalidate_dates)
+        self.discharge_date.value_changed.connect(self._revalidate_dates)
+
+    def _revalidate_dates(self, *_args):
+        """*_args absorbs value_changed's str payload — the check reads
+        the three fields' current state directly rather than the single
+        changed value, since a warning can depend on any pair of them."""
+        warnings = validate_date_order(
+            self.admission_date.get_iso(),
+            self.surgery_date.get_iso(),
+            self.discharge_date.get_iso(),
+        )
+        self._date_warning_label.setText(" ".join(warnings))
+        self._date_warning_label.setVisible(bool(warnings))
 
     def populate(self, summary):
         """Fills every field from a Summary — the reverse of bind_controller.
@@ -142,6 +168,7 @@ class PatientSection(CollapsibleSection):
         self.admission_date.set_iso(summary.date_admission or "")
         self.surgery_date.set_iso(summary.date_surgery or "")
         self.discharge_date.set_iso(summary.date_discharge or "")
+        self._revalidate_dates()
 
     def _line_edit(self, max_width=None):
         box = QLineEdit()

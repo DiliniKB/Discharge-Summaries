@@ -24,6 +24,7 @@ from app import theme
 from app.ui.widgets.autogrow_textedit import AutoGrowTextEdit
 from app.ui.widgets.collapsible import CollapsibleSection
 from app.ui.widgets.labeled import LabeledField
+from app.util.lab_ranges import is_abnormal
 
 # (name, unit) — order matches the spec's two-row grid: FBS/SCr/AST/Na, then K/S Ca/Hb.
 ANALYTES_ROW_1 = [("FBS", "mg/dL"), ("SCr", "µmol/L"), ("AST", "U/L"), ("Na", "mmol/L")]
@@ -127,13 +128,28 @@ class InvestigationsSection(CollapsibleSection):
         """
         for label, widget in self.analyte_inputs.items():
             widget.editingFinished.connect(lambda w=widget, l=label: controller.set_investigation(l, w.text()))
+            widget.editingFinished.connect(lambda l=label: self._update_abnormal_styling(l))
         self.management_input.editingFinished.connect(lambda: controller.set_field("management", self.management_input.toPlainText()))
         self.histology_input.editingFinished.connect(lambda: controller.set_field("histology_report", self.histology_input.toPlainText()))
+
+    def _update_abnormal_styling(self, label):
+        """Flags a value outside the general adult reference range
+        (app/util/lab_ranges.py) — a prompt to double-check, never a
+        block on saving. Dynamic Qt properties need an explicit
+        unpolish()/polish() to actually repaint, same idiom already used
+        for _PatientCard's selected state (app/ui/patient_list.py)."""
+        widget = self.analyte_inputs.get(label)
+        if widget is None:
+            return
+        widget.setProperty("abnormal", is_abnormal(label, widget.text()))
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
 
     def populate(self, summary, investigations_by_label):
         for label, widget in self.analyte_inputs.items():
             row = investigations_by_label.get(label)
             widget.setText(row["value"] if row else "")
+            self._update_abnormal_styling(label)
         self.management_input.setPlainText(summary.management or "")
         self.histology_input.setPlainText(summary.histology_report or "")
 

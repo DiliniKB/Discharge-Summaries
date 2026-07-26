@@ -16,6 +16,7 @@ import tempfile
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -83,9 +84,28 @@ class Editor(QWidget):
 
         self._set_has_open_summary(False)
 
+    def _commit_focused_field(self):
+        """A button click (or picking a different patient card) doesn't
+        reliably steal keyboard focus away from a QLineEdit still being
+        edited — macOS in particular treats buttons as click-only, not
+        focus-taking (same Cocoa HI behaviour already noted in
+        app/ui/sections/patient.py's Tab-order comment). Without this,
+        editingFinished never fires, so the just-typed value never
+        reaches controller.set_field()/set_investigation() at all —
+        flush() then has nothing pending to write, and the record is
+        silently missing whatever was still focused. clearFocus() forces
+        the blur (and its editingFinished) before anything reads or
+        persists the current field state. Scoped to widgets actually
+        inside this Editor so it can't steal focus from an unrelated
+        widget elsewhere in the window (e.g. the patient list's own search box)."""
+        focused = QApplication.focusWidget()
+        if focused is not None and self.isAncestorOf(focused):
+            focused.clearFocus()
+
     def load_summary(self, summary_id):
         """Loads a real summary from the DB through the controller and
         populates every section."""
+        self._commit_focused_field()  # don't lose an in-progress edit on the PREVIOUS record when switching
         summary = self.controller.load(summary_id)
         self.patient_section.populate(summary)
         self.procedure_section.populate(summary)
@@ -162,6 +182,7 @@ class Editor(QWidget):
     def _on_print(self):
         if self.controller.summary_id is None:
             return
+        self._commit_focused_field()
         self.controller.flush()  # printed content must match what's about to be saved, not stale field values
         with tempfile.TemporaryDirectory() as tmp_dir:
             dialog = PrintPreviewDialog(
@@ -172,11 +193,20 @@ class Editor(QWidget):
             # the modal closes — CLAUDE.md: temp file, released after printing.
 
     def _on_save(self):
+        # flush() only emits `saved` when something was actually pending —
+        # right after an autosave already wrote it, or on a freshly-created
+        # card nothing's been typed into yet, there's nothing to flush, but
+        # the record IS fully persisted. An explicit Save click must
+        # confirm that either way, or the label can be stuck on "Not
+        # saved" forever despite the DB already matching the screen.
+        self._commit_focused_field()
         self.controller.flush()
+        self._on_saved()
 
     def _on_duplicate(self):
         if self.controller.summary_id is None:
             return
+        self._commit_focused_field()
         self.controller.flush()  # must not duplicate stale unsaved edits — same reasoning as _on_print
         new_summary = self.controller.duplicate_summary(self.controller.summary_id)
         self.load_summary(new_summary.id)
