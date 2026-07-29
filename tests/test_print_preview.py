@@ -87,7 +87,10 @@ def test_editor_print_button_opens_a_real_preview_with_current_data(db_conn, tmp
     creator, current = doctors_db.list_active(db_conn)[:2]
     created = summaries.create(
         db_conn,
-        Summary(patient_name="W.D. Kusuma Wijerathna", bht_number="10178", ward="45", created_by=creator.id, procedure_title="thyroidectomy"),
+        Summary(
+            patient_name="W.D. Kusuma Wijerathna", bht_number="10178-2026", ward="45", telephone="0771234567",
+            created_by=creator.id, procedure_title="thyroidectomy",
+        ),
     )
 
     from app.ui.editor import Editor

@@ -158,6 +158,16 @@ def build_stylesheet():
         border: 2px solid {DANGER};
         background: {DANGER_TINT};
     }}
+    /* Name/Telephone/BHT format validation (app/ui/sections/patient.py,
+       app/util/validators.py) — unlike [abnormal], this one DOES block
+       the save for that field until fixed, a deliberate departure from
+       this app's usual warn-don't-block precedent (docs/decisions.md).
+       Same visual language as [abnormal] since both mean "look at this
+       field," just a different property name for a different meaning. */
+    QLineEdit[invalid="true"] {{
+        border: 2px solid {DANGER};
+        background: {DANGER_TINT};
+    }}
     /* Narrow numeric boxes (DateField) — the standard 12px input padding
        above leaves almost no room for 2-4 digits at this width. */
     QLineEdit#DateBox {{

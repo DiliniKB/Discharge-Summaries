@@ -17,9 +17,33 @@ per CLAUDE.md's planned layout — this section only calls it and displays
 the result. Same as duplicate BHT and the abnormal-lab styling
 (app/ui/sections/investigations.py), it warns, never blocks: an unusual
 but correct date order must still be saveable immediately.
+
+Name/Telephone/BHT format validation is different, and deliberately so:
+an invalid value there is never handed to controller.set_field() at
+all — that one field simply doesn't save until it's fixed, a real
+block, not a warning. This was an explicit request (docs/decisions.md),
+not this section improvising past the app's usual "warn, don't block"
+convention. It's scoped per field, not per record — an invalid BHT
+doesn't stop Name (or anything else already valid) from autosaving.
+
+The invalid/red flag only ever appears from this section's OWN blur
+handlers, never from populate() — a freshly created blank card (or an
+older record saved before this validation existed) must open looking
+normal, not already flagged red before the user has touched anything.
+populate() explicitly clears the flag on every load for this reason.
+
+Per-field blocking above stops a bad EDIT from being written, but a
+brand-new card's Name/Telephone/BHT start out blank regardless — that
+row is created directly via summaries.create(), bypassing this section
+entirely — so blocking only the edit doesn't stop the record as a whole
+from being treated as "done" while still incomplete. validity_changed
+(emitted after every blur here, and after populate()) reports the
+section's REAL current validity even when nothing is shown red yet;
+Editor uses it to disable Save/Print until Name, Telephone, and BHT are
+all actually valid, not just "not currently flagged."
 """
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIntValidator
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QLineEdit, QSizePolicy
 
@@ -27,7 +51,7 @@ from app import theme
 from app.ui.widgets.collapsible import CollapsibleSection
 from app.ui.widgets.datefield import DateField
 from app.ui.widgets.labeled import LabeledField
-from app.util.validators import validate_date_order
+from app.util.validators import validate_bht, validate_date_order, validate_name, validate_telephone
 
 DEFAULT_WARD = "45"  # docs/schema.md: ward TEXT, "Defaults to 45"
 
@@ -36,14 +60,26 @@ DEFAULT_WARD = "45"  # docs/schema.md: ward TEXT, "Defaults to 45"
 # needed (docs/decisions.md). Constrained the same way Sex already is.
 BLOOD_GROUPS = ["", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
 
+_NAME_ERROR = "Name is required."
+_BHT_ERROR = "BHT number must be in the format number-year, e.g. 12345-2026."
+_TELEPHONE_ERROR = "Enter a valid 10-digit phone number starting with 0, e.g. 0771234567."
+
 
 class PatientSection(CollapsibleSection):
+    # Emitted with the section's real current validity (Name/Telephone/BHT
+    # all pass, or not) after every blur that could change it, and after
+    # populate(). Editor listens so it can disable Save/Print until all
+    # three are actually valid — see module docstring.
+    validity_changed = Signal(bool)
+
     def __init__(self, parent=None):
         super().__init__(title="Patient & Admission", collapsed=False, parent=parent)
 
         # Name — the one field that should expand with the window.
         self.name_input = self._line_edit()
         self.body_layout.addWidget(LabeledField("Name", self.name_input, required=True))
+        self._name_error_label = self._make_error_label()
+        self.body_layout.addWidget(self._name_error_label)
 
         # Identity codes — compact, own row, own width negotiation.
         identity_row = QHBoxLayout()
@@ -75,13 +111,19 @@ class PatientSection(CollapsibleSection):
 
         identity_row.addStretch()
         self.body_layout.addLayout(identity_row)
+        # One shared error label below the row, same shape as the date
+        # warning label below dates_row — BHT is the only field in this
+        # row with a format to validate, so it's the only one that ever
+        # populates this text.
+        self._bht_error_label = self._make_error_label()
+        self.body_layout.addWidget(self._bht_error_label)
 
         # Contact / physical — Telephone expands a little, Blood Group stays compact.
         contact_row = QHBoxLayout()
         contact_row.setSpacing(theme.FIELD_GAP)
 
         self.telephone_input = self._line_edit(theme.WIDTH_TELEPHONE)
-        contact_row.addWidget(LabeledField("Telephone", self.telephone_input))
+        contact_row.addWidget(LabeledField("Telephone", self.telephone_input, required=True))
 
         self.blood_group_input = QComboBox()
         self.blood_group_input.addItems(BLOOD_GROUPS)
@@ -93,6 +135,8 @@ class PatientSection(CollapsibleSection):
 
         contact_row.addStretch()
         self.body_layout.addLayout(contact_row)
+        self._telephone_error_label = self._make_error_label()
+        self.body_layout.addWidget(self._telephone_error_label)
 
         # The three dates — one temporal sequence, own row, own width negotiation.
         dates_row = QHBoxLayout()
@@ -125,13 +169,19 @@ class PatientSection(CollapsibleSection):
 
     def bind_controller(self, controller):
         """Wires every field's blur to controller.set_field(). Called once
-        by Editor after construction — see app/ui/editor_controller.py."""
-        self.name_input.editingFinished.connect(lambda: controller.set_field("patient_name", self.name_input.text()))
+        by Editor after construction — see app/ui/editor_controller.py.
+
+        Name/Telephone/BHT go through a validate-then-maybe-save wrapper
+        instead of calling set_field() directly — an invalid value is
+        flagged and simply never handed to the controller, so it can't
+        reach the DB. Every other field here still saves unconditionally
+        on blur, same as before."""
+        self.name_input.editingFinished.connect(lambda: self._on_name_blur(controller))
         self.age_input.editingFinished.connect(lambda: controller.set_field("age", int(self.age_input.text()) if self.age_input.text() else None))
         self.sex_input.currentTextChanged.connect(lambda text: controller.set_field("sex", text))
-        self.bht_input.editingFinished.connect(lambda: controller.set_field("bht_number", self.bht_input.text()))
+        self.bht_input.editingFinished.connect(lambda: self._on_bht_blur(controller))
         self.ward_input.editingFinished.connect(lambda: controller.set_field("ward", self.ward_input.text()))
-        self.telephone_input.editingFinished.connect(lambda: controller.set_field("telephone", self.telephone_input.text()))
+        self.telephone_input.editingFinished.connect(lambda: self._on_telephone_blur(controller))
         self.blood_group_input.currentTextChanged.connect(lambda text: controller.set_field("blood_group", text))
         self.admission_date.value_changed.connect(lambda iso: controller.set_field("date_admission", iso))
         self.surgery_date.value_changed.connect(lambda iso: controller.set_field("date_surgery", iso))
@@ -139,6 +189,60 @@ class PatientSection(CollapsibleSection):
         self.admission_date.value_changed.connect(self._revalidate_dates)
         self.surgery_date.value_changed.connect(self._revalidate_dates)
         self.discharge_date.value_changed.connect(self._revalidate_dates)
+
+    def _on_name_blur(self, controller):
+        text = self.name_input.text()
+        valid = validate_name(text)
+        self._set_field_validity(self.name_input, self._name_error_label, valid, _NAME_ERROR)
+        if valid:
+            controller.set_field("patient_name", text)
+        self.validity_changed.emit(self.is_valid())
+
+    def _on_bht_blur(self, controller):
+        text = self.bht_input.text()
+        valid = validate_bht(text)
+        self._set_field_validity(self.bht_input, self._bht_error_label, valid, _BHT_ERROR)
+        if valid:
+            controller.set_field("bht_number", text)
+        self.validity_changed.emit(self.is_valid())
+
+    def _on_telephone_blur(self, controller):
+        text = self.telephone_input.text()
+        valid = validate_telephone(text)
+        self._set_field_validity(self.telephone_input, self._telephone_error_label, valid, _TELEPHONE_ERROR)
+        if valid:
+            controller.set_field("telephone", text)
+        self.validity_changed.emit(self.is_valid())
+
+    def is_valid(self):
+        """The section's real current validity — Name/Telephone/BHT all
+        pass — regardless of whether any of them is currently shown red.
+        A brand-new card is correctly invalid here (blank Name/BHT/
+        Telephone) even though nothing is flagged yet, since nothing's
+        been blurred (docs/decisions.md)."""
+        return (
+            validate_name(self.name_input.text())
+            and validate_bht(self.bht_input.text())
+            and validate_telephone(self.telephone_input.text())
+        )
+
+    @staticmethod
+    def _set_field_validity(widget, error_label, valid, message):
+        """Same unpolish()/polish() idiom as _PatientCard.set_selected()
+        (app/ui/patient_list.py) and the investigations abnormal-value
+        flag — dynamic Qt properties need it to actually repaint."""
+        widget.setProperty("invalid", not valid)
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+        error_label.setText("" if valid else message)
+        error_label.setVisible(not valid)
+
+    def _make_error_label(self):
+        label = QLabel("")
+        label.setObjectName("Danger")
+        label.setWordWrap(True)
+        label.setVisible(False)
+        return label
 
     def _revalidate_dates(self, *_args):
         """*_args absorbs value_changed's str payload — the check reads
@@ -169,6 +273,21 @@ class PatientSection(CollapsibleSection):
         self.surgery_date.set_iso(summary.date_surgery or "")
         self.discharge_date.set_iso(summary.date_discharge or "")
         self._revalidate_dates()
+        # Always cleared here, regardless of whether the loaded data is
+        # actually valid — a brand-new blank card (or any record with a
+        # not-yet-conforming Telephone/BHT saved before this validation
+        # existed) must not show red the instant it's opened, only after
+        # the user actually blurs an invalid value themselves. Also
+        # prevents a previous record's red state leaking onto the next
+        # one when switching cards.
+        self._set_field_validity(self.name_input, self._name_error_label, True, _NAME_ERROR)
+        self._set_field_validity(self.bht_input, self._bht_error_label, True, _BHT_ERROR)
+        self._set_field_validity(self.telephone_input, self._telephone_error_label, True, _TELEPHONE_ERROR)
+        # Not shown red (above), but Save/Print must still reflect REAL
+        # validity — a freshly created or reopened record with a blank/
+        # invalid required field is not actually ready to be treated as
+        # done, even though nothing here looks alarming yet.
+        self.validity_changed.emit(self.is_valid())
 
     def _line_edit(self, max_width=None):
         box = QLineEdit()

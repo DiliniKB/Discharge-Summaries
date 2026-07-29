@@ -78,7 +78,21 @@ def test_ctrl_n_opens_a_real_summary_then_ctrl_p_and_ctrl_s_fire(isolated_data_d
     QTest.keySequence(win, QKeySequence("Ctrl+N"))
     qapp.processEvents()
     assert new_card_clicked["count"] == 1
-    assert win.editor.print_button.isEnabled(), "Ctrl+N genuinely opened a summary"
+    assert win.editor.overflow_button.isEnabled(), "Ctrl+N genuinely opened a summary"
+    assert not win.editor.print_button.isEnabled(), "genuinely blank — Name/Telephone/BHT aren't filled in yet"
+
+    # Fill the required fields so Print/Save actually become enabled —
+    # otherwise Ctrl+P/Ctrl+S's own isEnabled() guard (main_window.py)
+    # would make them silent no-ops, which isn't what this test is about.
+    ps = win.editor.patient_section
+    ps.name_input.setText("W.D. Kusuma Wijerathna")
+    ps.name_input.editingFinished.emit()
+    ps.bht_input.setText("10178-2026")
+    ps.bht_input.editingFinished.emit()
+    ps.telephone_input.setText("0771234567")
+    ps.telephone_input.editingFinished.emit()
+    qapp.processEvents()
+    assert win.editor.print_button.isEnabled()
 
     QTest.keySequence(win, QKeySequence("Ctrl+P"))
     QTest.keySequence(win, QKeySequence("Ctrl+S"))

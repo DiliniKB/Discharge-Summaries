@@ -10,9 +10,18 @@ from app.ui.main_window import MainWindow
 
 
 def _seed_two(isolated_data_dir):
+    # BHT in number-year format and a real Telephone — both required to
+    # save (docs/decisions.md), so a fixture representing a properly
+    # filled real record needs both, unlike a genuinely blank new card.
     conn = connection.connect()
-    first = summaries.create(conn, Summary(patient_name="W.D. Kusuma Wijerathna", bht_number="10178", ward="45", date_discharge="2026-01-22"))
-    second = summaries.create(conn, Summary(patient_name="K.M. Silva", bht_number="10166", ward="45", date_discharge="2026-01-19"))
+    first = summaries.create(conn, Summary(
+        patient_name="W.D. Kusuma Wijerathna", bht_number="10178-2026", ward="45",
+        telephone="0771234567", date_discharge="2026-01-22",
+    ))
+    second = summaries.create(conn, Summary(
+        patient_name="K.M. Silva", bht_number="10166-2026", ward="45",
+        telephone="0112345678", date_discharge="2026-01-19",
+    ))
     connection.close(conn)
     return first, second
 
@@ -74,7 +83,12 @@ def test_new_card_creates_a_real_row_loads_and_selects_it(isolated_data_dir):
     assert len(win.patient_list._cards) == count_before + 1
     assert ed._name_label.text() == "(unnamed)", "the new card is genuinely blank"
     assert win.patient_list._selected_id is not None, "selected in the list immediately"
-    assert ed.print_button.isEnabled() and ed.save_button.isEnabled()
+    # Genuinely blank (Name/Telephone/BHT all empty) — Print/Save stay
+    # disabled until those required fields are actually filled in
+    # (docs/decisions.md), even though the row already exists in the DB.
+    assert not ed.print_button.isEnabled()
+    assert not ed.save_button.isEnabled()
+    assert ed.overflow_button.isEnabled(), "Duplicate/Delete aren't gated by field validity"
 
     row = summaries.get(win._conn, win.patient_list._selected_id)
     assert row is not None, "the new card is a genuine DB row, not just in-memory"

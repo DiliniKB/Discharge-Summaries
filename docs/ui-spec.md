@@ -249,7 +249,9 @@ Segoe UI (present on every Windows 10 install; no font shipping needed).
 
 - Every input has a visible persistent label. No placeholder-only labelling — placeholders vanish on focus and the user forgets which box is which.
 - Validation is inline, below the field, in `danger`. Never a modal dialog.
-- Required to save: Name, BHT. Everything else may be blank, exactly as on paper.
+- Required to save: Name, BHT, Telephone. Everything else may be blank, exactly as on paper.
+- **Name, Telephone, and BHT format are the one exception to "warn, don't block"** (`docs/decisions.md`): an invalid value there is flagged red and never saved at all — a blank Name, a malformed BHT, or a blank/malformed Telephone simply doesn't reach the database until it's fixed. BHT must be `number-year` (e.g. `12345-2026`); Telephone must be a 10-digit local number starting with `0` (e.g. `0771234567`). Blocking is per-field: an invalid BHT doesn't stop Name or anything else already valid on the same card from autosaving. The red flag only ever appears after the user's own blur — a freshly created blank card, or an older record saved before this validation existed, never opens already flagged.
+- **Save and Print are disabled until Name, Telephone, and BHT are all actually valid** — not just "not currently shown red." A brand-new card starts with Save/Print disabled immediately (nothing's been filled in yet), even before any field has been touched or flagged. This closes the gap the per-field block alone left open: a new card's row already exists in the database the moment it's created, so blocking bad edits wasn't enough on its own to stop an incomplete record from being treated as finished.
 - Duplicate BHT on save: warn but permit. Same patient can have multiple admissions.
 - Colour is never the only signal — errors carry an icon and text.
 

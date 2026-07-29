@@ -25,8 +25,25 @@ def test_loading_a_new_summary_enables_the_action_bar_and_shows_unnamed(db_conn,
     editor.load_summary(created.id)
     qapp.processEvents()
 
-    assert editor.print_button.isEnabled()
+    # Overflow (Duplicate/Delete) only needs a summary open. Print/Save
+    # additionally need Name/Telephone/BHT to be valid — a brand-new
+    # blank card starts out invalid (nothing's been filled in yet), so
+    # they stay disabled until that's fixed (docs/decisions.md).
+    assert editor.overflow_button.isEnabled()
+    assert not editor.print_button.isEnabled()
+    assert not editor.save_button.isEnabled()
     assert editor._name_label.text() == "(unnamed)"
+
+    editor.patient_section.name_input.setText("W.D. Kusuma Wijerathna")
+    editor.patient_section.name_input.editingFinished.emit()
+    editor.patient_section.bht_input.setText("10178-2026")
+    editor.patient_section.bht_input.editingFinished.emit()
+    editor.patient_section.telephone_input.setText("0771234567")
+    editor.patient_section.telephone_input.editingFinished.emit()
+    controller.flush()  # settle the coalesce timer now — a stray armed one firing after teardown hits a closed db_conn
+
+    assert editor.print_button.isEnabled()
+    assert editor.save_button.isEnabled()
 
     editor.close()
 
@@ -40,7 +57,7 @@ def test_patient_section_widgets_persist_to_the_db_on_blur(db_conn, qapp):
     ps = editor.patient_section
     ps.name_input.setText("W.D. Kusuma Wijerathna")
     ps.name_input.editingFinished.emit()  # simulates real focus-loss
-    ps.bht_input.setText("10178")
+    ps.bht_input.setText("10178-2026")  # number-year format — app/util/validators.py::validate_bht
     ps.bht_input.editingFinished.emit()
     ps.age_input.setText("54")
     ps.age_input.editingFinished.emit()
@@ -55,7 +72,7 @@ def test_patient_section_widgets_persist_to_the_db_on_blur(db_conn, qapp):
 
     row = summaries.get(db_conn, created.id)
     assert row.patient_name == "W.D. Kusuma Wijerathna"
-    assert row.bht_number == "10178"
+    assert row.bht_number == "10178-2026"
     assert row.age == 54, "Age typed as text converted to int and persisted"
     assert row.sex == "Female", "Sex combobox selection persisted immediately"
     assert row.blood_group == "O+", "Blood Group combobox selection persisted immediately"

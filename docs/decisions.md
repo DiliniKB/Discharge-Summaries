@@ -358,6 +358,25 @@ Covered under "Computed Advanced Search column widths" above: `QStyle.standardIc
 
 ---
 
+## Name/Telephone/BHT format validation actually blocks the save — a deliberate exception to "warn, don't block"
+
+**Decision:** `app/util/validators.py` adds `validate_name`, `validate_telephone`, `validate_bht`. Unlike every other validation in this app (duplicate BHT, abnormal lab values, date order — all warn but still save), an invalid Name/Telephone/BHT value is never handed to `EditorController.set_field()` at all: `PatientSection` (`app/ui/sections/patient.py`) checks on blur, and only calls the controller when the value passes. The field is flagged red (`QLineEdit[invalid="true"]`, `app/theme.py` — same visual language as the existing `[abnormal="true"]` rule, different property name since the *meaning* is different: one blocks, one doesn't) with an inline error message below the row.
+
+**This was a direct, explicit request, not this section improvising past the established precedent.** Every other validator in this codebase intentionally warns rather than blocks, on the reasoning that a real, unusual-but-correct value must always be saveable immediately. Name/Telephone/BHT are different: a blank name or a malformed BHT isn't a rare-but-valid edge case, it's data that's actually wrong, and the ward asked for this one to actually stop it.
+
+**Blocking is per-field, not per-record.** An invalid BHT doesn't stop Name (or Age, or anything else already valid) from autosaving on its own blur — each field still goes through `set_field()` independently, exactly as before. This matters because `new_summary()` still creates a blank row directly via `summaries.create()`, bypassing this UI-level check entirely (a brand-new card has always started with blank required fields, per `docs/ui-spec.md` §3.2 — that's unchanged); the new behavior only stops a bad *edit* from being written, not initial blank creation.
+
+**The red flag never appears from `populate()` — only from this section's own blur handlers.** A first pass had `populate()` immediately flag a blank Name/BHT as invalid on load, on the reasoning that a brand-new card genuinely doesn't have valid data yet. In practice this meant every fresh "+ New Card" opened already covered in red before the doctor had typed a single character — alarming and wrong for a form nobody has touched yet, and reported as such. `populate()` now unconditionally *clears* the invalid flag on every load instead of checking real validity, regardless of what the loaded data actually is — this also fixes a second, related bug: switching from a record left mid-edit with an invalid field (red, un-fixed) onto a different one used to carry that red flag over onto the newly loaded card, which has nothing to do with the field that's actually invalid.
+
+**Formats chosen:**
+- **Name**: required, non-blank after stripping whitespace.
+- **Telephone**: required — exactly 10 digits starting with `0` (e.g. `0771234567`), the standard Sri Lankan local-number shape. Punctuation (dashes, spaces) and the `+94` country-code form are deliberately not accepted; if that turns out to be too strict for real ward data, this is a one-line regex change in `app/util/validators.py`, not a design change.
+- **BHT**: required, `number-year` per the ward's own stated convention — one or more digits, a literal hyphen, then a 4-digit year (e.g. `12345-2026`). Existing test fixtures using bare-digit BHT numbers (`"10178"`, no year) were updated to the new format where they go through this section's blur-triggered save path (`tests/test_editor_wiring.py`); fixtures that construct `Summary` rows directly via the DB layer, bypassing the UI entirely, were left alone since this validation only ever applies to the UI blur flow, not direct DB writes.
+
+**Per-field blocking alone wasn't enough to stop a record being "saved" without these details.** `new_summary()` still creates a blank row directly via `summaries.create()` (unchanged, per `docs/ui-spec.md` §3.2) — that record already exists in the DB with a blank Name/Telephone/BHT the instant "+ New Card" is clicked, entirely bypassing the blur-time block above, which only ever stops a bad *edit* from overwriting what's already there. Reported as "can save without those details," correctly: nothing actually stopped a doctor from leaving a card in that state and treating it as finished. `PatientSection.validity_changed` (emitted after every relevant blur and after `populate()`) now reports the section's real current validity — true or false regardless of whether anything is currently shown red — and `Editor` (`app/ui/editor.py`) uses it to disable **Save and Print** whenever it's `False`. Print is gated the same way Save is: printing an incomplete summary is at least as bad as saving one. Duplicate/Delete (`overflow_button`) are deliberately NOT gated this way — neither is about finishing the record, and blocking Delete on an already-incomplete record would make it harder to get rid of, not easier.
+
+---
+
 ## Open items
 
 | Item | Blocks |

@@ -31,7 +31,7 @@ One row per discharge summary. The central table.
 | `sex` | TEXT | `Female` / `Male` / null |
 | `bht_number` | TEXT NOT NULL | **Not unique** — see below |
 | `ward` | TEXT | Defaults to `45` |
-| `telephone` | TEXT | Text, not integer — leading zeros, spaces, `+94` |
+| `telephone` | TEXT | Text, not integer, so a leading zero isn't silently dropped. Required to save (`docs/decisions.md`): a 10-digit local number starting with `0`, enforced at the UI layer only (no CHECK constraint), same as `bht_number`'s format below |
 | `blood_group` | TEXT | Added field, not on the printed paper form |
 | `date_admission` | TEXT | ISO-8601 `YYYY-MM-DD` |
 | `date_surgery` | TEXT | ISO-8601 |
@@ -57,6 +57,8 @@ One row per discharge summary. The central table.
 **Dates are stored ISO-8601 and displayed DD/MM/YYYY.** Conversion happens at the UI boundary only. ISO sorts correctly as text, which is why it's the storage format.
 
 **`bht_number` is not unique.** The same patient can be admitted more than once and carry the same BHT. The UI warns on duplicate but does not block. Do not add a unique constraint.
+
+**`bht_number` format is enforced at the UI layer, not the schema.** The column itself stays plain `TEXT NOT NULL` — no CHECK constraint — but `app/ui/sections/patient.py` blocks saving a value that isn't `number-year` (e.g. `12345-2026`, see `app/util/validators.py::validate_bht`), the one field alongside Name/Telephone where this app actually blocks a save rather than just warning (`docs/decisions.md`).
 
 **`created_by` / `last_edited_by` are the audit trail.** This is why the app needs no login — attribution is a field on the record, not an authentication system.
 

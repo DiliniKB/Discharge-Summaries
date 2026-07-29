@@ -81,7 +81,12 @@ class Editor(QWidget):
         self.investigations_section.bind_controller(controller)
         self.attachments_section.bind_controller(controller)
         controller.saved.connect(self._on_saved)
+        # Save/Print need Name/Telephone/BHT to actually be valid, not
+        # just "not currently flagged red" — see patient.py's module
+        # docstring and _update_save_print_enabled() below.
+        self.patient_section.validity_changed.connect(lambda _valid: self._update_save_print_enabled())
 
+        self._has_open_summary = False
         self._set_has_open_summary(False)
 
     def _commit_focused_field(self):
@@ -173,11 +178,22 @@ class Editor(QWidget):
         return bar
 
     def _set_has_open_summary(self, has_summary):
-        self.print_button.setEnabled(has_summary)
-        self.save_button.setEnabled(has_summary)
+        self._has_open_summary = has_summary
         self.overflow_button.setEnabled(has_summary)
         self.attachments_section.set_enabled(has_summary)
         self._save_state_label.setText("Not saved" if has_summary else "")
+        self._update_save_print_enabled()
+
+    def _update_save_print_enabled(self):
+        """Save/Print need both an open summary AND Name/Telephone/BHT to
+        currently be valid (app/ui/sections/patient.py's is_valid()) — a
+        record missing its required identity/contact fields isn't
+        actually ready to be treated as done, even before anything is
+        shown red. Duplicate/Delete (overflow_button) aren't gated the
+        same way — neither is about finishing the record."""
+        enabled = self._has_open_summary and self.patient_section.is_valid()
+        self.print_button.setEnabled(enabled)
+        self.save_button.setEnabled(enabled)
 
     def _on_print(self):
         if self.controller.summary_id is None:
