@@ -385,6 +385,26 @@ This has to coexist carefully with the label's other job (reflecting a real `✓
 
 ---
 
+## Name typeahead — suggest past admissions, autofill, but never guess BHT
+
+**Decision:** typing (debounced, 150ms, min 2 characters) into Name searches past admissions by substring — `app/db/summaries.py::search_patients_by_name`, a plain SQL `LIKE`, not fuzzy/scored — and shows matches via a `QCompleter` in `UnfilteredPopupCompletion` mode (`app/ui/sections/patient.py`). Picking one autofills Age/Sex/Telephone/Blood Group, and (via `Editor._on_name_suggestion_selected`, since `PatientSection` has no reference to `ClinicalHistorySection`) carries forward Past Medical/Surgical History and Allergies — genuinely persistent facts about the patient. Deliberately does NOT carry forward presenting complaint, examination, or findings: those describe THIS encounter, and an old one autofilled in would mislead, not help. BHT is deliberately never autofilled — a muted note names the old BHT and discharge date instead, since whether this admission continues under the same BHT or needs a new one is the doctor's call.
+
+**Not fuzzy, not "AI."** This app runs on a 4GB/HDD ward laptop with no network calls allowed (CLAUDE.md), so anything resembling real ML is off the table — the honest version of "AI features, low weight" is a well-placed plain-text query, not a model.
+
+**This shipped twice before it actually worked, both times with a hand-rolled `Qt.Popup` `QListWidget` instead of `QCompleter` — worth recording exactly why, since the failure mode wasn't visible from the code, only from real use:**
+
+1. **First version**: a bare `Qt.Popup` `QListWidget`, shown/hidden manually via `.move()`/`.resize()`/`.show()` positioned under Name via `mapToGlobal`. Reported as "cannot backspace the whole name after loading" — a `Qt.Popup` window can grab real OS-level keyboard activation the instant it's shown, on top of a doctor still actively typing/backspacing, eating keystrokes meant for the field. This was never actually reproduced by an automated `QTest` script (synthetic key events don't reproduce real OS window-manager focus routing), so the fix (`Qt.NoFocus` + `Qt.WA_ShowWithoutActivating` on the popup) was applied defensively, on the theory alone.
+2. **Second version**: same popup, now with `Qt.WA_ShowWithoutActivating` added. This one is confirmed, not theoretical: on this Qt/macOS build, that attribute keeps a `Qt.Popup` window from ever being raised above the main window. `isVisible()` reported `True` and the widget was genuinely exposed to the compositor (`windowHandle().isExposed()` also `True`) — it was just rendered *behind* the (maximized) main window, so nobody could ever see it. Reported plainly as "typeahead not working." A worse bug than the one the attribute was added to guard against.
+3. **Current version**: replaced the hand-rolled window entirely with `QCompleter`. This isn't a tweak to the same mechanism, it's a different mechanism — Qt's own tested "popup below a QLineEdit," used internally for exactly this UI shape everywhere (address bars, file dialogs). By design, its popup never takes keyboard focus from the widget it's attached to, and Qt itself owns showing/positioning/raising it, so neither of the two failure modes above has a place to reoccur. `UnfilteredPopupCompletion` mode is used because the matches are already filtered server-side by `search_patients_by_name` — Qt's own default prefix-filtering would be redundant, and wrong (`LIKE '%query%'` is substring, Qt's default matching is prefix-only). Selection is read via the `activated` signal's display-text overload, matched back against the parallel `_name_matches` list kept in step with the completer's string-list model in `_show_name_suggestions`.
+
+**Lesson for next time, written down so it doesn't get relearned:** `QWidget.isVisible()` on a popup only means "Qt thinks it's shown," not "a person can see it." Before trusting it, check `windowHandle().isExposed()` at minimum, and get a real screen capture where the environment allows one — an automated widget `.grab()` only captures a widget's own window and can never show a *separate* top-level popup regardless of whether it actually rendered, so it proves nothing either way about this specific class of bug.
+
+**Excludes the record currently open.** Without `exclude_id`, typing a record's own name into itself would "suggest" itself back — not useful, just noise. Also excludes soft-deleted rows, same as every other query in this codebase.
+
+**Ward defaults to "46" at the dataclass level, not just the widget.** `populate()` alone falling back to `DEFAULT_WARD` only fixes what's *displayed* — a brand-new record whose Ward field the doctor never touches still needs to *save* "46", not blank. `Summary.ward`'s own default (`app/models.py`) is `DEFAULT_WARD`, so `new_summary()` writes a real "46" to the DB regardless of whether the widget's cosmetic pre-fill ever gets touched or reloaded.
+
+---
+
 ## Open items
 
 | Item | Blocks |

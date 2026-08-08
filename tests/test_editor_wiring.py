@@ -476,3 +476,199 @@ def test_fill_in_message_reverts_to_not_saved_once_complete_before_any_flush(db_
 
     controller.flush()  # settle the coalesce timer before teardown
     editor.close()
+
+
+def test_name_typeahead_shows_matching_past_admissions(db_conn, qapp):
+    summaries.create(db_conn, Summary(
+        patient_name="W.D. Kusuma Wijerathna", bht_number="10178-2026", age=54, sex="Female",
+        telephone="0771234567", blood_group="O+", date_discharge="2026-01-22",
+    ))
+
+    editor, controller = _make_editor(db_conn)
+    created = controller.new_summary()
+    editor.load_summary(created.id)
+    qapp.processEvents()
+
+    ps = editor.patient_section
+    ps.name_input.setText("kusuma")
+    ps.name_input.textEdited.emit("kusuma")
+    ps._name_search_debounce.stop()
+    ps._show_name_suggestions()
+    qapp.processEvents()
+
+    assert len(ps._name_matches) == 1
+    assert ps._name_matches[0]["patient_name"] == "W.D. Kusuma Wijerathna"
+    assert ps._name_completer.model().stringList() == [
+        "W.D. Kusuma Wijerathna   ·   BHT 10178-2026   ·   22/01/2026"
+    ]
+
+    editor.close()
+
+
+def test_name_typeahead_requires_a_minimum_query_length(db_conn, qapp):
+    summaries.create(db_conn, Summary(patient_name="W.D. Kusuma Wijerathna", bht_number="10178-2026"))
+
+    editor, controller = _make_editor(db_conn)
+    created = controller.new_summary()
+    editor.load_summary(created.id)
+    qapp.processEvents()
+
+    ps = editor.patient_section
+    ps.name_input.setText("k")
+    ps._show_name_suggestions()
+    assert ps._name_matches == []
+
+    editor.close()
+
+
+def test_name_typeahead_excludes_the_currently_open_record(db_conn, qapp):
+    editor, controller = _make_editor(db_conn)
+    created = controller.new_summary()
+    editor.load_summary(created.id)
+    qapp.processEvents()
+
+    ps = editor.patient_section
+    ps.name_input.setText("kusuma wijerathna")
+    ps.name_input.editingFinished.emit()  # saves the name onto THIS record
+    ps.name_input.setText("kusuma")  # re-typing it shouldn't suggest itself
+    ps._show_name_suggestions()
+
+    assert ps._name_matches == []
+
+    controller.flush()  # settle the coalesce timer armed by the editingFinished blur above before teardown
+    editor.close()
+
+
+def test_selecting_a_suggestion_autofills_and_saves_but_leaves_bht_alone(db_conn, qapp):
+    summaries.create(db_conn, Summary(
+        patient_name="W.D. Kusuma Wijerathna", bht_number="10178-2026", age=54, sex="Female",
+        telephone="0771234567", blood_group="O+", date_discharge="2026-01-22",
+    ))
+
+    editor, controller = _make_editor(db_conn)
+    created = controller.new_summary()
+    editor.load_summary(created.id)
+    qapp.processEvents()
+
+    ps = editor.patient_section
+    ps.name_input.setText("kusuma")
+    ps._show_name_suggestions()
+    qapp.processEvents()
+
+    display = ps._name_completer.model().stringList()[0]
+    ps._on_name_suggestion_activated(display)
+    qapp.processEvents()
+    controller.flush()
+
+    assert ps.name_input.text() == "W.D. Kusuma Wijerathna"
+    assert ps.age_input.text() == "54"
+    assert ps.sex_input.currentText() == "Female"
+    assert ps.telephone_input.text() == "0771234567"
+    assert ps.blood_group_input.currentText() == "O+"
+    assert ps.bht_input.text() == "", "BHT is never autofilled — a clinical decision, not a guess"
+    assert ps._bht_note_label.isVisible() is True
+    assert "10178-2026" in ps._bht_note_label.text()
+
+    saved = summaries.get(db_conn, created.id)
+    assert saved.patient_name == "W.D. Kusuma Wijerathna"
+    assert saved.age == 54
+    assert saved.telephone == "0771234567"
+
+    editor.close()
+
+
+def test_bht_note_hides_once_the_doctor_enters_their_own_bht(db_conn, qapp):
+    summaries.create(db_conn, Summary(patient_name="W.D. Kusuma Wijerathna", bht_number="10178-2026"))
+
+    editor, controller = _make_editor(db_conn)
+    created = controller.new_summary()
+    editor.load_summary(created.id)
+    qapp.processEvents()
+
+    ps = editor.patient_section
+    ps.name_input.setText("kusuma")
+    ps._show_name_suggestions()
+    qapp.processEvents()
+    display = ps._name_completer.model().stringList()[0]
+    ps._on_name_suggestion_activated(display)
+    assert ps._bht_note_label.isVisible() is True
+
+    ps.bht_input.setText("99999-2026")
+    ps.bht_input.editingFinished.emit()
+
+    assert ps._bht_note_label.isVisible() is False
+
+    controller.flush()
+    editor.close()
+
+
+def test_name_suggestions_popup_never_takes_keyboard_focus(db_conn, qapp):
+    # Regression test: the FIRST implementation used a hand-rolled
+    # Qt.Popup QListWidget, which had two real failure modes in
+    # production use before being replaced with QCompleter (module
+    # docstring, docs/decisions.md): (1) Qt.NoFocus alone was suspected
+    # (never confirmed) to still let the popup steal window activation
+    # mid-keystroke, and (2) adding Qt.WA_ShowWithoutActivating to guard
+    # against that instead kept the popup from ever being raised above
+    # the main window — reported plainly as "typeahead not working."
+    # QCompleter is Qt's own tested mechanism for this and is asserted
+    # here to keep name_input focused while its popup is shown.
+    summaries.create(db_conn, Summary(patient_name="W.D. Kusuma Wijerathna", bht_number="10178-2026"))
+
+    editor, controller = _make_editor(db_conn)
+    editor.raise_()
+    editor.activateWindow()
+    QTest.qWaitForWindowActive(editor)
+    created = controller.new_summary()
+    editor.load_summary(created.id)
+    qapp.processEvents()
+
+    ps = editor.patient_section
+    ps.name_input.setFocus()
+    qapp.processEvents()
+    assert ps.name_input.hasFocus() is True, "name_input must actually hold focus before the popup race can be tested"
+
+    QTest.keyClicks(ps.name_input, "kusuma")
+    ps._name_search_debounce.stop()
+    ps._show_name_suggestions()
+    qapp.processEvents()
+
+    assert ps.name_input.hasFocus() is True, "name_input must keep focus while the popup is showing"
+
+    editor.close()
+
+
+def test_selecting_a_suggestion_also_carries_forward_clinical_history(db_conn, qapp):
+    summaries.create(db_conn, Summary(
+        patient_name="W.D. Kusuma Wijerathna", bht_number="10178-2026",
+        past_medical_history="Hypothyroidism on replacement", past_surgical_history="Appendicectomy 2019",
+        allergies="Penicillin", presenting_complaint="Neck swelling", examination="Diffuse goitre",
+    ))
+
+    editor, controller = _make_editor(db_conn)
+    created = controller.new_summary()
+    editor.load_summary(created.id)
+    qapp.processEvents()
+
+    ps = editor.patient_section
+    ps.name_input.setText("kusuma")
+    ps._show_name_suggestions()
+    qapp.processEvents()
+    display = ps._name_completer.model().stringList()[0]
+    ps._on_name_suggestion_activated(display)
+    qapp.processEvents()
+    controller.flush()
+
+    ch = editor.clinical_history_section
+    assert ch.past_medical_history_input.toPlainText() == "Hypothyroidism on replacement"
+    assert ch.past_surgical_history_input.toPlainText() == "Appendicectomy 2019"
+    assert ch.allergies_input.toPlainText() == "Penicillin"
+
+    saved = summaries.get(db_conn, created.id)
+    assert saved.past_medical_history == "Hypothyroidism on replacement"
+    assert saved.allergies == "Penicillin"
+    # Encounter-specific fields are NOT carried forward — an old
+    # presenting complaint/examination would mislead, not help.
+    assert saved.presenting_complaint == "", "not carried forward — describes the OLD encounter, not this one"
+
+    editor.close()

@@ -16,6 +16,17 @@ def test_new_summary_creates_a_real_db_row_immediately(db_conn):
     assert summaries.get(db_conn, created.id) is not None
 
 
+def test_new_summary_defaults_ward_even_if_never_touched(db_conn):
+    # Summary.ward's own dataclass default (app/models.py) — not just a
+    # widget-level pre-fill — so a doctor who never clicks into Ward
+    # still saves "46", not a blank string. A widget-only default is
+    # purely visual until the field is blurred (docs/decisions.md).
+    ctrl = EditorController(db_conn)
+    created = ctrl.new_summary()
+    assert created.ward == "46"
+    assert summaries.get(db_conn, created.id).ward == "46"
+
+
 def test_set_field_noop_when_value_unchanged(db_conn):
     ctrl = EditorController(db_conn)
     ctrl.new_summary()

@@ -41,19 +41,41 @@ from being treated as "done" while still incomplete. validity_changed
 section's REAL current validity even when nothing is shown red yet;
 Editor uses it to disable Save/Print until Name, Telephone, and BHT are
 all actually valid, not just "not currently flagged."
+
+Name typeahead: typing (debounced 150ms) into Name searches past
+admissions by substring (app/db/summaries.py::search_patients_by_name)
+and shows them via a QCompleter in UnfilteredPopupCompletion mode — the
+matches are already filtered server-side, so Qt's own prefix filtering
+would be redundant (and wrong: our LIKE is substring, Qt's default is
+prefix). QCompleter, not a hand-rolled Qt.Popup window, deliberately:
+it's Qt's own battle-tested "popup below a QLineEdit" mechanism, used
+internally for exactly this shape of UI everywhere from address bars to
+file dialogs, and by design never steals editing focus from the line
+edit it's attached to — a custom Qt.Popup QListWidget was tried first
+and failed twice in real use (docs/decisions.md) for reasons a
+hand-rolled popup has to solve itself and QCompleter already solves.
+
+Picking a suggestion autofills Age/Sex/Telephone/Blood Group from that
+admission — through the SAME blur handlers a manual edit would use, so
+it's saved and validated identically, not a separate path. BHT is
+deliberately NOT autofilled: whether this admission continues under the
+same BHT or needs a new one is a clinical decision, not something to
+guess on the doctor's behalf — a note names the old BHT instead, so the
+doctor can decide.
 """
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QIntValidator
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QLineEdit, QSizePolicy
+from PySide6.QtWidgets import QComboBox, QCompleter, QHBoxLayout, QLabel, QLineEdit, QSizePolicy
 
 from app import theme
+from app.db import summaries
+from app.models import DEFAULT_WARD
+from app.printing import layout as print_layout
 from app.ui.widgets.collapsible import CollapsibleSection
 from app.ui.widgets.datefield import DateField
 from app.ui.widgets.labeled import LabeledField
 from app.util.validators import validate_bht, validate_date_order, validate_name, validate_telephone
-
-DEFAULT_WARD = "46"  # docs/schema.md: ward TEXT, "Defaults to 46"
 
 # A rushed doctor typing free text produces "O positive" / "o+" / "O Positive"
 # inconsistently for a field that exists specifically because it's clinically
@@ -64,6 +86,10 @@ _NAME_ERROR = "Name is required."
 _BHT_ERROR = "BHT number must be in the format number-year, e.g. 12345-2026."
 _TELEPHONE_ERROR = "Enter a valid 10-digit phone number starting with 0, e.g. 0771234567."
 
+_NAME_SEARCH_MIN_CHARS = 2
+_NAME_SEARCH_DEBOUNCE_MS = 150
+_NAME_SEARCH_MAX_RESULTS = 5
+
 
 class PatientSection(CollapsibleSection):
     # Emitted with the section's real current validity (Name/Telephone/BHT
@@ -72,14 +98,46 @@ class PatientSection(CollapsibleSection):
     # three are actually valid — see module docstring.
     validity_changed = Signal(bool)
 
+    # Emitted with the full matched row after a typeahead selection —
+    # this section only owns/autofills its own Age/Sex/Telephone/Blood
+    # Group fields; Past Medical/Surgical History and Allergies belong to
+    # ClinicalHistorySection, which Editor (not this section) has a
+    # reference to. Same "announce, don't reach into a sibling" shape as
+    # Editor's own duplicated/deleted signals.
+    name_suggestion_selected = Signal(dict)
+
     def __init__(self, parent=None):
         super().__init__(title="Patient & Admission", collapsed=False, parent=parent)
+        self._controller = None
+        self._name_matches = []  # current debounced query's rows, parallel to the completer's string list
 
         # Name — the one field that should expand with the window.
         self.name_input = self._line_edit()
         self.body_layout.addWidget(LabeledField("Name", self.name_input, required=True))
         self._name_error_label = self._make_error_label()
         self.body_layout.addWidget(self._name_error_label)
+        self._bht_note_label = QLabel("")
+        self._bht_note_label.setObjectName("Muted")
+        self._bht_note_label.setWordWrap(True)
+        self._bht_note_label.setVisible(False)
+        self.body_layout.addWidget(self._bht_note_label)
+
+        # Qt's own popup-below-a-QLineEdit mechanism (module docstring) —
+        # UnfilteredPopupCompletion shows the model's current contents
+        # as-is, since search_patients_by_name() already did the actual
+        # filtering server-side.
+        self._name_completer = QCompleter([], self)
+        self._name_completer.setCompletionMode(QCompleter.CompletionMode.UnfilteredPopupCompletion)
+        self.name_input.setCompleter(self._name_completer)
+        self._name_completer.activated[str].connect(self._on_name_suggestion_activated)
+
+        self._name_search_debounce = QTimer(self)
+        self._name_search_debounce.setSingleShot(True)
+        self._name_search_debounce.timeout.connect(self._show_name_suggestions)
+        # textEdited (not textChanged) fires only on actual user typing —
+        # our own setText() calls (autofill, populate()) must NOT re-open
+        # this popup on themselves.
+        self.name_input.textEdited.connect(self._on_name_text_edited)
 
         # Identity codes — compact, own row, own width negotiation.
         identity_row = QHBoxLayout()
@@ -176,6 +234,7 @@ class PatientSection(CollapsibleSection):
         flagged and simply never handed to the controller, so it can't
         reach the DB. Every other field here still saves unconditionally
         on blur, same as before."""
+        self._controller = controller  # needed by the name-typeahead selection handler, outside any blur
         self.name_input.editingFinished.connect(lambda: self._on_name_blur(controller))
         self.age_input.editingFinished.connect(lambda: controller.set_field("age", int(self.age_input.text()) if self.age_input.text() else None))
         self.sex_input.currentTextChanged.connect(lambda text: controller.set_field("sex", text))
@@ -204,6 +263,9 @@ class PatientSection(CollapsibleSection):
         self._set_field_validity(self.bht_input, self._bht_error_label, valid, _BHT_ERROR)
         if valid:
             controller.set_field("bht_number", text)
+        # The doctor has now made their own call on this admission's BHT
+        # (per the typeahead note below) — stop showing the old one.
+        self._bht_note_label.setVisible(False)
         self.validity_changed.emit(self.is_valid())
 
     def _on_telephone_blur(self, controller):
@@ -213,6 +275,74 @@ class PatientSection(CollapsibleSection):
         if valid:
             controller.set_field("telephone", text)
         self.validity_changed.emit(self.is_valid())
+
+    def _on_name_text_edited(self, _text):
+        self._name_search_debounce.start(_NAME_SEARCH_DEBOUNCE_MS)
+
+    def _show_name_suggestions(self):
+        """Queries past admissions matching the current Name text and
+        loads them into the completer's model — only once a summary is
+        actually open (nothing to autofill into otherwise) and the query
+        is long enough to be a real search, not noise on the first
+        keystroke."""
+        self._name_matches = []
+        if self._controller is None or self._controller.summary_id is None:
+            return
+        query = self.name_input.text().strip()
+        if len(query) < _NAME_SEARCH_MIN_CHARS:
+            return
+
+        matches = summaries.search_patients_by_name(
+            self._controller.conn, query, exclude_id=self._controller.summary_id, limit=_NAME_SEARCH_MAX_RESULTS
+        )
+        if not matches:
+            return
+
+        self._name_matches = matches
+        display_strings = [
+            f"{row['patient_name']}   ·   BHT {row['bht_number']}   ·   "
+            f"{print_layout.format_date(row['date_discharge']) or 'not discharged'}"
+            for row in matches
+        ]
+        self._name_completer.model().setStringList(display_strings)
+        self._name_completer.complete()
+
+    def _on_name_suggestion_activated(self, display_text):
+        """Autofills Age/Sex/Telephone/Blood Group from the selected past
+        admission — through the SAME blur handlers a manual edit would
+        use (_on_name_blur/_on_telephone_blur), so this is validated and
+        saved identically to typing it in by hand, not a separate path.
+        BHT is deliberately left for the doctor to decide (module
+        docstring). Matched by display string against this section's own
+        last query results — set together in _show_name_suggestions, so
+        they're always in step."""
+        try:
+            index = self._name_completer.model().stringList().index(display_text)
+        except ValueError:
+            return
+        row = self._name_matches[index]
+
+        self.name_input.setText(row["patient_name"])
+        self.age_input.setText(str(row["age"]) if row["age"] is not None else "")
+        self.sex_input.setCurrentText(row["sex"] or "")  # fires currentTextChanged -> saves itself
+        self.telephone_input.setText(row["telephone"] or "")
+        self.blood_group_input.setCurrentText(row["blood_group"] or "")  # fires currentTextChanged -> saves itself
+
+        self._on_name_blur(self._controller)
+        self._on_telephone_blur(self._controller)
+        self._controller.set_field("age", int(self.age_input.text()) if self.age_input.text() else None)
+
+        discharge = print_layout.format_date(row["date_discharge"]) or "not discharged (still admitted)"
+        self._bht_note_label.setText(
+            f"This patient's last BHT was {row['bht_number']} ({discharge}). Enter this admission's BHT yourself — "
+            f"the same number if this continues that admission, a new one if it doesn't."
+        )
+        self._bht_note_label.setVisible(True)
+
+        # Past Medical/Surgical History + Allergies belong to
+        # ClinicalHistorySection, which this section has no reference to —
+        # Editor listens and fills those in (module docstring).
+        self.name_suggestion_selected.emit(row)
 
     def is_valid(self):
         """The section's real current validity — Name/Telephone/BHT all
@@ -277,7 +407,7 @@ class PatientSection(CollapsibleSection):
         self.age_input.setText(str(summary.age) if summary.age is not None else "")
         self.sex_input.setCurrentText(summary.sex or "")
         self.bht_input.setText(summary.bht_number)
-        self.ward_input.setText(summary.ward or "")
+        self.ward_input.setText(summary.ward or DEFAULT_WARD)
         self.telephone_input.setText(summary.telephone or "")
         self.blood_group_input.setCurrentText(summary.blood_group or "")
         self.admission_date.set_iso(summary.date_admission or "")
@@ -299,6 +429,11 @@ class PatientSection(CollapsibleSection):
         # invalid required field is not actually ready to be treated as
         # done, even though nothing here looks alarming yet.
         self.validity_changed.emit(self.is_valid())
+        # A stale debounce/popup/note from whatever was open before must
+        # not carry over onto the newly loaded record.
+        self._name_search_debounce.stop()
+        self._name_completer.popup().hide()
+        self._bht_note_label.setVisible(False)
 
     def _line_edit(self, max_width=None):
         box = QLineEdit()

@@ -346,6 +346,18 @@ def test_populate_clears_invalid_flag_left_over_from_a_previous_record():
     assert sec._name_error_label.isVisible() is False
 
 
+def test_populate_falls_back_to_default_ward_when_blank():
+    from app.models import Summary
+
+    sec = PatientSection()
+    sec.show()
+    sec.populate(Summary(patient_name="Test Patient", bht_number="1", ward=""))
+    assert sec.ward_input.text() == "46"
+
+    sec.populate(Summary(patient_name="Test Patient", bht_number="1", ward="12"))
+    assert sec.ward_input.text() == "12", "a real, non-default ward is never overridden"
+
+
 def test_populate_with_inconsistent_saved_dates_shows_warning_immediately():
     from app.models import Summary
 

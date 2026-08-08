@@ -85,6 +85,7 @@ class Editor(QWidget):
         # just "not currently flagged red" — see patient.py's module
         # docstring and _update_save_print_enabled() below.
         self.patient_section.validity_changed.connect(lambda _valid: self._update_save_print_enabled())
+        self.patient_section.name_suggestion_selected.connect(self._on_name_suggestion_selected)
 
         self._has_open_summary = False
         self._set_has_open_summary(False)
@@ -130,6 +131,28 @@ class Editor(QWidget):
     def _on_saved(self):
         now = datetime.datetime.now().strftime("%H:%M")
         self._save_state_label.setText(f"✓ Saved {now}")
+
+    def _on_name_suggestion_selected(self, row):
+        """Carries Past Medical/Surgical History + Allergies forward from
+        a name-typeahead selection — genuinely persistent facts about the
+        patient, not this specific encounter (app/db/summaries.py). Saved
+        directly via set_field(), same as ClinicalHistorySection's own
+        bind_controller() would on a real blur — setPlainText() alone
+        doesn't fire that section's editingFinished.
+
+        Overwrites unconditionally, same as PatientSection's own
+        Age/Sex/Telephone/Blood Group autofill — pick the right patient
+        before typing anything else into Clinical History, or reselect to
+        correct it."""
+        ch = self.clinical_history_section
+        for widget, column in (
+            (ch.past_medical_history_input, "past_medical_history"),
+            (ch.past_surgical_history_input, "past_surgical_history"),
+            (ch.allergies_input, "allergies"),
+        ):
+            value = row.get(column) or ""
+            widget.setPlainText(value)
+            self.controller.set_field(column, value)
 
     def _build_action_bar(self):
         bar = QFrame()

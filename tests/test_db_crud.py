@@ -217,3 +217,43 @@ def test_restore_clears_deleted_at_and_reappears_in_normal_views(db_conn):
     assert len(summaries.list_page(conn)) == 1
     assert len(summaries.list_deleted(conn)) == 0
     assert len(summaries.advanced_search(conn)) == 1
+
+
+def test_search_patients_by_name_matches_substring_and_selects_only_needed_columns(db_conn):
+    conn = db_conn
+    summaries.create(conn, Summary(
+        patient_name="W.D. Kusuma Wijerathna", bht_number="10178-2026", age=54, sex="Female",
+        telephone="0771234567", blood_group="O+", date_discharge="2026-01-22",
+        past_medical_history="Hypothyroidism", past_surgical_history="Appendicectomy",
+        allergies="Penicillin", presenting_complaint="Neck swelling",
+    ))
+    summaries.create(conn, Summary(patient_name="A.B. Perera", bht_number="10202"))
+
+    matches = summaries.search_patients_by_name(conn, "kusuma")
+    assert len(matches) == 1
+    row = matches[0]
+    assert row["patient_name"] == "W.D. Kusuma Wijerathna"
+    assert set(row.keys()) == {
+        "patient_name", "bht_number", "date_discharge", "age", "sex", "telephone", "blood_group",
+        "past_medical_history", "past_surgical_history", "allergies",
+    }, "never SELECT * (CLAUDE.md) — only the columns the typeahead popup/autofill actually use"
+
+
+def test_search_patients_by_name_excludes_the_given_id_and_soft_deleted_rows(db_conn):
+    conn = db_conn
+    self_record = summaries.create(conn, Summary(patient_name="W.D. Kusuma Wijerathna", bht_number="10178"))
+    other = summaries.create(conn, Summary(patient_name="W.D. Kusuma Herath", bht_number="10202"))
+    deleted = summaries.create(conn, Summary(patient_name="W.D. Kusuma Deleted", bht_number="10303"))
+    summaries.soft_delete(conn, deleted.id)
+
+    matches = summaries.search_patients_by_name(conn, "kusuma", exclude_id=self_record.id)
+    assert [m["patient_name"] for m in matches] == [other.patient_name]
+
+
+def test_search_patients_by_name_respects_limit(db_conn):
+    conn = db_conn
+    for i in range(8):
+        summaries.create(conn, Summary(patient_name=f"Kusuma Patient {i}", bht_number=f"{i}-2026"))
+
+    matches = summaries.search_patients_by_name(conn, "kusuma", limit=3)
+    assert len(matches) == 3

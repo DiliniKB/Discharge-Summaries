@@ -143,6 +143,41 @@ def get(conn, summary_id):
     return _row_to_summary(row) if row else None
 
 
+def search_patients_by_name(conn, query, exclude_id=None, limit=5):
+    """Backs the Patient & Admission section's live name typeahead
+    (app/ui/sections/patient.py) — a doctor typing a returning patient's
+    name gets suggested their past admissions, to autofill Age/Sex/
+    Telephone/Blood Group (and Past Medical/Surgical History + Allergies
+    — genuinely persistent facts about the patient, not this specific
+    admission) from instead of retyping. Deliberately does NOT include
+    presenting_complaint/examination/findings — those describe THIS
+    encounter, and carrying an old one forward would mislead, not help.
+
+    Plain SQL LIKE, not fuzzy/scored — cheap enough to run on every
+    debounced keystroke, and a partial-name substring match is what a
+    doctor typing a few letters actually expects (docs/decisions.md).
+
+    Excludes the record currently open (exclude_id) — matching a
+    record's own just-typed name against itself isn't a suggestion,
+    it's noise. Only the columns the popup/autofill actually use are
+    selected, same "never SELECT *" discipline as list_page()/
+    advanced_search() (CLAUDE.md)."""
+    like = f"%{query}%"
+    params = [like]
+    exclude_clause = ""
+    if exclude_id is not None:
+        exclude_clause = "AND id != ?"
+        params.append(exclude_id)
+    rows = conn.execute(
+        f"SELECT patient_name, bht_number, date_discharge, age, sex, telephone, blood_group, "
+        f"past_medical_history, past_surgical_history, allergies "
+        f"FROM summaries WHERE deleted_at IS NULL AND patient_name LIKE ? {exclude_clause} "
+        f"ORDER BY id DESC LIMIT ?",
+        (*params, limit),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def create(conn, summary):
     now = _now_iso()
     columns = [c for c in _SUMMARY_COLUMNS if c not in ("created_at", "updated_at")]

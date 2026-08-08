@@ -136,6 +136,10 @@ Collapsed headers show a fill count (`2 of 6 filled`) so nothing is invisible. A
 
 ## 4. Field-level decisions
 
+### 4.0 Name typeahead
+
+Typing 2+ characters into Name (debounced 150ms) shows a `QCompleter` popup of past admissions whose name contains what's typed — `Name · BHT · discharge date` per row. Picking one autofills Age, Sex, Telephone, and Blood Group from that admission and saves them immediately, same as typing them in by hand. It also carries forward Past Medical/Surgical History and Allergies into the Clinical History section — genuinely persistent facts about the patient — but never presenting complaint, examination, or findings, which describe this admission only. **BHT is never autofilled** — a note names the old BHT and discharge date instead, since whether this admission continues under the same BHT or needs a new one is the doctor's call, not something to guess (`docs/decisions.md`). The record currently open is excluded from its own suggestions. Uses Qt's own `QCompleter`, not a custom popup window — two earlier hand-rolled attempts each broke in real use in ways that never showed up in automated tests (`docs/decisions.md`).
+
 ### 4.1 Investigations as a grid, not free text
 
 The paper form has one free-text box. In practice it always holds the same seven analytes.

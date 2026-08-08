@@ -5,6 +5,12 @@ per chunk, rather than speculatively — see docs/schema.md for the full tables.
 from dataclasses import dataclass
 from typing import Optional
 
+# docs/schema.md: ward "Defaults to 46" — set here, not just on the
+# widget, so a doctor who never touches Ward still saves "46" rather
+# than blank (a new row is written the instant "+ New Card" is clicked,
+# before any widget default is ever seen).
+DEFAULT_WARD = "46"
+
 
 @dataclass
 class Doctor:
@@ -48,7 +54,7 @@ class Summary:
     age: Optional[int] = None
     sex: str = ""
     bht_number: str = ""
-    ward: str = ""
+    ward: str = DEFAULT_WARD
     telephone: str = ""
     blood_group: str = ""
     date_admission: str = ""
