@@ -33,7 +33,7 @@ def test_section_title_and_default_state():
     sec.show()
     assert sec._title.text() == "PATIENT & ADMISSION"
     assert sec.expanded is True, "open by default"
-    assert sec.ward_input.text() == "45"
+    assert sec.ward_input.text() == "46"
     assert [sec.sex_input.itemText(i) for i in range(sec.sex_input.count())] == ["", "Female", "Male"]
 
 

@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from app.db import summaries
 from app.db import templates as templates_db
+from app.models import Summary
 from app.ui.editor import Editor
 from app.ui.editor_controller import EditorController
 
@@ -33,9 +34,15 @@ def test_loading_a_new_summary_enables_the_action_bar_and_shows_unnamed(db_conn,
     assert not editor.print_button.isEnabled()
     assert not editor.save_button.isEnabled()
     assert editor._name_label.text() == "(unnamed)"
+    # Disabled with no red shown anywhere yet (nothing's been blurred) —
+    # the muted status text is the only visible explanation, so it must
+    # actually name what's missing (docs/decisions.md).
+    assert editor._save_state_label.text() == "Fill in Name, Telephone, BHT to save"
 
     editor.patient_section.name_input.setText("W.D. Kusuma Wijerathna")
     editor.patient_section.name_input.editingFinished.emit()
+    assert editor._save_state_label.text() == "Fill in Telephone, BHT to save", "narrows as fields are fixed"
+
     editor.patient_section.bht_input.setText("10178-2026")
     editor.patient_section.bht_input.editingFinished.emit()
     editor.patient_section.telephone_input.setText("0771234567")
@@ -44,6 +51,9 @@ def test_loading_a_new_summary_enables_the_action_bar_and_shows_unnamed(db_conn,
 
     assert editor.print_button.isEnabled()
     assert editor.save_button.isEnabled()
+    # controller.flush() above actually wrote the pending fields and
+    # emitted `saved`, so this correctly reads "✓ Saved", not "Not saved".
+    assert editor._save_state_label.text().startswith("✓ Saved"), "reflects the real save that just happened"
 
     editor.close()
 
@@ -323,4 +333,146 @@ def test_save_button_force_flushes_with_no_wait(db_conn, qapp):
     editor._on_save()  # what the Save button / Ctrl+S actually calls
     assert summaries.get(db_conn, created.id).telephone == "0771234567"
 
+    editor.close()
+
+
+def test_save_click_does_not_confirm_saved_when_the_forced_blur_reveals_invalid_data(db_conn, qapp):
+    # Regression test: Save can be enabled based on the last-BLURRED
+    # value of BHT/Name/Telephone, but clicking Save forces a blur via
+    # _commit_focused_field() — if the user was still mid-edit typing
+    # something invalid there, that forced blur is the first time it's
+    # actually validated. Save must not flush()/confirm "Saved" over a
+    # value it just rejected.
+    editor, controller = _make_editor(db_conn)
+    created = summaries.create(db_conn, Summary(
+        patient_name="W.D. Kusuma Wijerathna", bht_number="10178-2026", telephone="0771234567",
+    ))
+    controller.load(created.id)
+    editor.load_summary(created.id)
+    qapp.processEvents()
+    assert editor.save_button.isEnabled() is True
+
+    # Real OS-level focus (needed for _commit_focused_field()'s
+    # QApplication.focusWidget() check to find this widget) isn't
+    # guaranteed by setFocus() alone once other tests in the same
+    # session have left other top-level widgets open — same window-
+    # activation quirk noted in test_section_patient.py's tab-order test.
+    editor.raise_()
+    editor.activateWindow()
+    QTest.qWaitForWindowActive(editor)
+    qapp.processEvents()
+
+    ps = editor.patient_section
+    ps.bht_input.setFocus()
+    qapp.processEvents()
+    assert qapp.focusWidget() is ps.bht_input, "bht_input must actually hold focus before the forced-blur race can be tested"
+    ps.bht_input.setText("garbage")  # typed, not yet blurred
+    qapp.processEvents()
+    assert editor.save_button.isEnabled() is True, "still reflects the last-blurred (valid) value"
+
+    editor._on_save()  # what the Save button actually calls
+    qapp.processEvents()
+
+    assert ps.bht_input.property("invalid") is True, "the forced blur flagged it red"
+    assert editor._save_state_label.text() != "✓ Saved", "must not claim saved over a value it just rejected"
+    assert summaries.get(db_conn, created.id).bht_number == "10178-2026", "the bad value never reached the DB"
+
+    editor.close()
+
+
+def test_print_click_does_not_open_preview_when_the_forced_blur_reveals_invalid_data(db_conn, qapp, monkeypatch):
+    from app.ui.dialogs.print_preview import PrintPreviewDialog
+
+    # Tracks whether THIS test's _on_print() call constructs a preview —
+    # scanning qapp.topLevelWidgets() for a PrintPreviewDialog instead
+    # would false-positive on one left over from an earlier test in the
+    # same session that hasn't been garbage-collected yet.
+    constructed = []
+    original_init = PrintPreviewDialog.__init__
+
+    def _tracking_init(self, *args, **kwargs):
+        constructed.append(self)
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(PrintPreviewDialog, "__init__", _tracking_init)
+    monkeypatch.setattr(PrintPreviewDialog, "exec", lambda self: None)
+
+    editor, controller = _make_editor(db_conn)
+    created = summaries.create(db_conn, Summary(
+        patient_name="W.D. Kusuma Wijerathna", bht_number="10178-2026", telephone="0771234567",
+    ))
+    controller.load(created.id)
+    editor.load_summary(created.id)
+    qapp.processEvents()
+    assert editor.print_button.isEnabled() is True
+
+    editor.raise_()
+    editor.activateWindow()
+    QTest.qWaitForWindowActive(editor)
+    qapp.processEvents()
+
+    ps = editor.patient_section
+    ps.telephone_input.setFocus()
+    qapp.processEvents()
+    assert qapp.focusWidget() is ps.telephone_input, "telephone_input must actually hold focus before the forced-blur race can be tested"
+    ps.telephone_input.setText("not-a-phone-number")
+    qapp.processEvents()
+    assert editor.print_button.isEnabled() is True, "still reflects the last-blurred (valid) value"
+
+    editor._on_print()  # what the Print button actually calls
+    qapp.processEvents()
+
+    assert ps.telephone_input.property("invalid") is True
+    assert constructed == [], "must not open a preview for invalid data"
+
+    editor.close()
+
+
+def test_no_op_blur_on_an_already_saved_record_does_not_revert_the_label(db_conn, qapp):
+    # Regression test: _update_save_print_enabled() runs on every blur of
+    # Name/Telephone/BHT, valid or not, even ones where nothing actually
+    # changed. It must not stomp a truthful "✓ Saved" back to "Not saved"
+    # just because a field was clicked into and back out of again.
+    editor, controller = _make_editor(db_conn)
+    created = summaries.create(db_conn, Summary(
+        patient_name="W.D. Kusuma Wijerathna", bht_number="10178-2026", telephone="0771234567",
+    ))
+    controller.load(created.id)
+    editor.load_summary(created.id)
+    qapp.processEvents()
+
+    editor._on_saved()  # simulate a real save having just completed
+    assert editor._save_state_label.text().startswith("✓ Saved")
+
+    ps = editor.patient_section
+    ps.name_input.editingFinished.emit()  # blur with no text change at all
+    qapp.processEvents()
+
+    assert editor._save_state_label.text().startswith("✓ Saved"), "an unrelated no-op blur must not revert this"
+
+    editor.close()
+
+
+def test_fill_in_message_reverts_to_not_saved_once_complete_before_any_flush(db_conn, qapp):
+    # Isolates _update_save_print_enabled()'s "Fill in ..." -> "Not
+    # saved" transition specifically, decoupled from an explicit flush()
+    # (which would show "✓ Saved" instead — see the test above).
+    editor, controller = _make_editor(db_conn)
+    created = controller.new_summary()
+    editor.load_summary(created.id)
+    qapp.processEvents()
+    assert editor._save_state_label.text() == "Fill in Name, Telephone, BHT to save"
+
+    ps = editor.patient_section
+    ps.name_input.setText("W.D. Kusuma Wijerathna")
+    ps.name_input.editingFinished.emit()
+    ps.bht_input.setText("10178-2026")
+    ps.bht_input.editingFinished.emit()
+    ps.telephone_input.setText("0771234567")
+    ps.telephone_input.editingFinished.emit()
+
+    assert editor._save_state_label.text() == "Not saved"
+    assert editor.save_button.isEnabled()
+
+    controller.flush()  # settle the coalesce timer before teardown
     editor.close()

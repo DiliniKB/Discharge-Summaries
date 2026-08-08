@@ -53,7 +53,7 @@ from app.ui.widgets.datefield import DateField
 from app.ui.widgets.labeled import LabeledField
 from app.util.validators import validate_bht, validate_date_order, validate_name, validate_telephone
 
-DEFAULT_WARD = "45"  # docs/schema.md: ward TEXT, "Defaults to 45"
+DEFAULT_WARD = "46"  # docs/schema.md: ward TEXT, "Defaults to 46"
 
 # A rushed doctor typing free text produces "O positive" / "o+" / "O Positive"
 # inconsistently for a field that exists specifically because it's clinically
@@ -220,11 +220,22 @@ class PatientSection(CollapsibleSection):
         A brand-new card is correctly invalid here (blank Name/BHT/
         Telephone) even though nothing is flagged yet, since nothing's
         been blurred (docs/decisions.md)."""
-        return (
-            validate_name(self.name_input.text())
-            and validate_bht(self.bht_input.text())
-            and validate_telephone(self.telephone_input.text())
-        )
+        return not self.missing_required_fields()
+
+    def missing_required_fields(self):
+        """Labels of whichever required fields are currently invalid.
+        Nothing here shows red until the user's own blur (module
+        docstring), so a silently-disabled Save/Print needs another way
+        to say why — Editor uses this to fill in the actual field
+        names rather than leaving the doctor to guess."""
+        missing = []
+        if not validate_name(self.name_input.text()):
+            missing.append("Name")
+        if not validate_telephone(self.telephone_input.text()):
+            missing.append("Telephone")
+        if not validate_bht(self.bht_input.text()):
+            missing.append("BHT")
+        return missing
 
     @staticmethod
     def _set_field_validity(widget, error_label, valid, message):

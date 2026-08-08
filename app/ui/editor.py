@@ -120,8 +120,11 @@ class Editor(QWidget):
 
         self._name_label.setText(summary.patient_name or "(unnamed)")
         self._meta_label.setText(f"BHT {summary.bht_number} · Ward {summary.ward or ''}")
+        # _set_has_open_summary() sets "Not saved", then (via
+        # _update_save_print_enabled()) replaces it with a "Fill in ..."
+        # explanation if the record isn't actually complete — don't set
+        # "Not saved" again afterward, that would silently clobber it.
         self._set_has_open_summary(True)
-        self._save_state_label.setText("Not saved")
         return summary
 
     def _on_saved(self):
@@ -190,16 +193,49 @@ class Editor(QWidget):
         record missing its required identity/contact fields isn't
         actually ready to be treated as done, even before anything is
         shown red. Duplicate/Delete (overflow_button) aren't gated the
-        same way — neither is about finishing the record."""
-        enabled = self._has_open_summary and self.patient_section.is_valid()
+        same way — neither is about finishing the record.
+
+        A disabled Save button with no visible red anywhere (a genuinely
+        untouched brand-new card, or an older record whose Telephone
+        predates this validation) is a dead end with no explanation —
+        reported as such. Since patient.py deliberately never shows red
+        until the user's own blur, this is the other half: name the
+        actual missing field(s) in the muted status text instead, so
+        "why can't I save this" always has a visible answer.
+        """
+        valid = self.patient_section.is_valid()
+        enabled = self._has_open_summary and valid
         self.print_button.setEnabled(enabled)
         self.save_button.setEnabled(enabled)
+
+        if not self._has_open_summary:
+            return
+        if not valid:
+            missing = ", ".join(self.patient_section.missing_required_fields())
+            self._save_state_label.setText(f"Fill in {missing} to save")
+        elif self._save_state_label.text().startswith("Fill in "):
+            # Just became valid — but leave an existing "✓ Saved"/"Not
+            # saved" alone otherwise; this only runs on a real blur, and
+            # a no-op blur on an already-saved record must not make a
+            # truthful "✓ Saved" flicker back to "Not saved".
+            self._save_state_label.setText("Not saved")
 
     def _on_print(self):
         if self.controller.summary_id is None:
             return
         self._commit_focused_field()
-        self.controller.flush()  # printed content must match what's about to be saved, not stale field values
+        self.controller.flush()  # printed content must match what's about to be saved, not stale field values — always run, even if we bail out below, so a stray-armed coalesce timer never outlives this call
+        # _commit_focused_field() can itself be what makes this record
+        # invalid: if the user was still mid-edit in Name/Telephone/BHT
+        # when they clicked Print, forcing that field to blur just now
+        # is the FIRST time its current text gets validated — Print
+        # could have been enabled a moment ago (based on the last
+        # blurred, valid value) and only become invalid because of the
+        # blur this same click just forced. Whatever WAS valid is still
+        # flushed above; only opening a preview for an incomplete record
+        # is what's refused here.
+        if not self.patient_section.is_valid():
+            return
         # ignore_cleanup_errors: os.startfile(path, "print") (app/printing/printer.py)
         # hands the PDF to whatever the shell's default handler is and
         # returns immediately — that external viewer/print spooler can
@@ -224,7 +260,19 @@ class Editor(QWidget):
         # confirm that either way, or the label can be stuck on "Not
         # saved" forever despite the DB already matching the screen.
         self._commit_focused_field()
-        self.controller.flush()
+        self.controller.flush()  # always run first — whatever's actually valid still saves, and this stops any coalesce timer armed above before we might bail out below
+        # _commit_focused_field() can itself be what makes this record
+        # invalid: if the user was still mid-edit in Name/Telephone/BHT
+        # when they clicked Save, forcing that field to blur just now is
+        # the FIRST validation of it — Save could have been enabled a
+        # moment ago (based on the last-blurred, valid value) and only
+        # become invalid because of the blur this click just forced.
+        # flush() above already saved whatever WAS valid; only the "✓
+        # Saved" confirmation is refused here — showing it over a value
+        # that was just flagged red would contradict the red border/
+        # message sitting right next to it.
+        if not self.patient_section.is_valid():
+            return
         self._on_saved()
 
     def _on_duplicate(self):

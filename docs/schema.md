@@ -30,7 +30,7 @@ One row per discharge summary. The central table.
 | `age` | INTEGER | |
 | `sex` | TEXT | `Female` / `Male` / null |
 | `bht_number` | TEXT NOT NULL | **Not unique** — see below |
-| `ward` | TEXT | Defaults to `45` |
+| `ward` | TEXT | Defaults to `46` |
 | `telephone` | TEXT | Text, not integer, so a leading zero isn't silently dropped. Required to save (`docs/decisions.md`): a 10-digit local number starting with `0`, enforced at the UI layer only (no CHECK constraint), same as `bht_number`'s format below |
 | `blood_group` | TEXT | Added field, not on the printed paper form |
 | `date_admission` | TEXT | ISO-8601 `YYYY-MM-DD` |
